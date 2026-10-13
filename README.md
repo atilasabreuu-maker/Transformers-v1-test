@@ -1,112 +1,103 @@
 --[[
-    TRANSFORMER ENGINE MOBILE - LocalScript único
-    Versão: 1.0
+===============================================================
+ TRANSFORMER ENGINE — AUTÔNOMO / MOBILE FIRST
+ Um único LocalScript. Não exige modelos, animações, sons,
+ pastas, RemoteEvents, módulos ou IDs preparados pelo criador.
 
-    INSTALAÇÃO:
-    1. Coloque este LocalScript em StarterPlayer > StarterPlayerScripts.
-    2. Em ReplicatedStorage, crie os Models "MechaRig" e "VehicleRig".
-    3. MechaRig precisa ter uma BasePart chamada HumanoidRootPart, definida como PrimaryPart,
-       peças ligadas por Motor6D e, idealmente, um Humanoid + Animator.
-    4. VehicleRig precisa ter uma PrimaryPart (preferencialmente chamada VehicleRoot ou Chassis).
-       O veículo é controlado cinematicamente pelo script; suas peças são ancoradas localmente.
-    5. Sons opcionais: ReplicatedStorage > Sounds > Sound_Transform_Start,
-       Sound_Transform_Mid, Sound_Transform_End, Sound_Footstep_Mecha, Sound_Vehicle_Engine.
-       Cada Sound precisa ter SoundId configurado.
-    6. Animações opcionais: ReplicatedStorage > Animations > Animation objects nomeados
-       MechaIdle, MechaWalk, MechaRun e MechaJump. Os rigs precisam usar juntas compatíveis.
+ INSTALAÇÃO:
+ StarterPlayer > StarterPlayerScripts > LocalScript
+ Cole este arquivo inteiro.
 
-    LIMITAÇÃO IMPORTANTE:
-    Este é um sistema visual/controlado pelo cliente. Um LocalScript não pode garantir que
-    outros jogadores vejam os clones ou controlar NetworkOwnership de um modelo arbitrário.
-    Replicação multiplayer real requer uma camada de servidor/RemoteEvent.
+ O script constrói um mecha e um caminhão usando Parts nativas,
+ esconde/restaura localmente o avatar, anima as placas por CFrame,
+ e cria UI, partículas, luzes e controles mobile em tempo de execução.
+
+ LIMITAÇÕES IMPORTANTES:
+ • Os modelos gerados são mecânicos/estilizados, não malhas 3D
+   cinematográficas modeladas à mão.
+ • É uma transformação visual local. Um LocalScript sozinho não
+   replica o mecha para os outros jogadores nem controla autoridade
+   física do servidor.
+ • O Roblox não fornece síntese de efeitos sonoros arbitrários em
+   Luau puro sem fonte de áudio; esta versão não finge possuir SFX.
+===============================================================
 ]]
 
---==============================================================
--- 1. SERVIÇOS E CONFIGURAÇÕES
---==============================================================
+---------------------------
+-- 1. SERVIÇOS E CONFIGURAÇÃO
+---------------------------
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
-local ContextActionService = game:GetService("ContextActionService")
 local Lighting = game:GetService("Lighting")
 local Workspace = game:GetService("Workspace")
-local Debris = game:GetService("Debris")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
-local camera = Workspace.CurrentCamera
 
-local CONFIG = {
-    MechaTemplateName = "MechaRig",
-    VehicleTemplateName = "VehicleRig",
-    SoundsFolderName = "Sounds",
-    AnimationsFolderName = "Animations",
-
-    TransformDuration = 3.35,
-    TransformHumanDuration = 2.65,
-    MechaWalkSpeed = 27,
-    MechaRunSpeed = 36,
-    MechaJumpVelocity = 46,
-    VehicleMaxSpeed = 66,
-    VehicleReverseSpeed = 20,
-    VehicleAcceleration = 44,
-    VehicleBrake = 78,
-    VehicleTurnSpeed = 2.2,
-    VehicleIdleTurnSpeed = 0.62,
-    Gravity = Workspace.Gravity,
-
-    MechaFOV = 74,
-    VehicleFOV = 79,
-    HumanFOV = 70,
-    CameraShake = 0.22,
-    CameraShakeFrequency = 9,
-    GroundRayUp = 180,
-    GroundRayDown = 650,
-    WallRayHeight = 2.4,
-
-    EnableProceduralHeadTracking = true,
-    EnableCameraShake = true,
-    EnableParticleEffects = true,
-    EnableSoundEffects = true,
-    EnableKeyboardShortcuts = true,
-    AutoPlayAuthoredAnimations = true,
-
-    SparkTexture = "rbxasset://textures/particles/sparkles_main.dds",
-    SmokeTexture = "rbxasset://textures/particles/smoke_main.dds",
-    AccentColor = Color3.fromRGB(38, 220, 255),
-    WarningColor = Color3.fromRGB(255, 126, 54),
+local CFG = {
+    TRANSFORM_TIME = 3.15,
+    HUMANOID_SPEED = 16,
+    MECHA_SPEED = 27,
+    VEHICLE_SPEED = 58,
+    MECHA_JUMP_POWER = 58,
+    MECHA_JUMP_HEIGHT = 8,
+    WALK_SWAY = 0.52,
+    RUN_SWAY = 0.72,
+    MECHA_FOV = 77,
+    VEHICLE_FOV = 80,
+    HUMANOID_FOV = 70,
+    FX_PARTICLE_RATE = 16,
+    FX_LOW_PARTICLE_RATE = 8,
+    SHOW_KEYBOARD_SHORTCUTS = true,
 }
 
-local STATE_HUMAN = "Humanoide"
-local STATE_TRANSFORMING = "Transformando"
-local STATE_MECHA = "Mecha"
-local STATE_VEHICLE = "Veículo"
+local COLORS = {
+    Red = Color3.fromRGB(190, 39, 43),
+    RedLight = Color3.fromRGB(255, 75, 61),
+    Blue = Color3.fromRGB(28, 93, 190),
+    BlueLight = Color3.fromRGB(0, 190, 255),
+    BlueGlass = Color3.fromRGB(20, 70, 112),
+    Steel = Color3.fromRGB(87, 105, 122),
+    Silver = Color3.fromRGB(170, 186, 198),
+    Dark = Color3.fromRGB(20, 28, 39),
+    Black = Color3.fromRGB(7, 10, 16),
+    Gold = Color3.fromRGB(255, 181, 48),
+    White = Color3.fromRGB(225, 240, 255),
+    Tire = Color3.fromRGB(14, 17, 22),
+    Glass = Color3.fromRGB(9, 27, 44),
+}
 
-local currentState = STATE_HUMAN
-local isBusy = false
-local activeRig = nil
-local character = player.Character or player.CharacterAdded:Wait()
-local humanoid = character:WaitForChild("Humanoid")
-local humanRoot = character:WaitForChild("HumanoidRootPart")
-local humanCache = nil
-local activeLoopSound = nil
-local footstepClock = 0
-local jumpRequested = false
-local verticalVelocity = 0
-local moveSpeedCurrent = 0
-local vehicleSpeedCurrent = 0
-local sessionClock = 0
-local destroying = false
+local FORMS = {
+    HUMANOIDE = "HUMANOIDE",
+    MECHA = "MECHA",
+    VEICULO = "VEÍCULO",
+}
 
---==============================================================
--- 2. UTILITÁRIOS
---==============================================================
-local function safeCall(callback, ...)
-    local ok, result = pcall(callback, ...)
+local form = FORMS.HUMANOIDE
+local transition = nil
+local character = nil
+local humanoid = nil
+local hrp = nil
+local avatarParts = {}
+local descendantConnection = nil
+local normalProperties = nil
+local camera = Workspace.CurrentCamera
+local initialFOV = camera and camera.FieldOfView or CFG.HUMANOID_FOV
+CFG.HUMANOID_FOV = initialFOV
+local lastRootCF = nil
+local destroyed = false
+local walkPhase = 0
+local wheelPhase = 0
+local effectTick = 0
+
+---------------------------
+-- 2. FUNÇÕES UTILITÁRIAS
+---------------------------
+local function safeCall(fn)
+    local ok, result = pcall(fn)
     if not ok then
-        warn("[Transformer Engine]", result)
+        warn("[Transformer Engine] " .. tostring(result))
     end
     return ok, result
 end
@@ -115,1814 +106,1085 @@ local function clamp01(value)
     return math.clamp(value, 0, 1)
 end
 
-local function smoothStep(value)
+local function smoothstep(value)
     value = clamp01(value)
     return value * value * (3 - 2 * value)
 end
 
-local function easeOutCubic(value)
-    value = clamp01(value)
-    return 1 - ((1 - value) ^ 3)
+local function angleCF(x, y, z)
+    return CFrame.Angles(math.rad(x or 0), math.rad(y or 0), math.rad(z or 0))
 end
 
-local function easeOutBack(value)
-    value = clamp01(value)
-    local c1 = 1.70158
-    local c3 = c1 + 1
-    return 1 + c3 * ((value - 1) ^ 3) + c1 * ((value - 1) ^ 2)
+local function setPartBasics(part, name, size, color, material, transparency)
+    part.Name = name
+    part.Size = size
+    part.Color = color or COLORS.Steel
+    part.Material = material or Enum.Material.Metal
+    part.Transparency = transparency or 0
+    part.Anchored = true
+    part.CanCollide = false
+    part.CanTouch = false
+    part.CanQuery = false
+    part.CastShadow = part.Material ~= Enum.Material.Neon
+    part.TopSurface = Enum.SurfaceType.Smooth
+    part.BottomSurface = Enum.SurfaceType.Smooth
 end
 
-local function lerpNumber(a, b, alpha)
-    return a + (b - a) * alpha
+local function createVisualModel(name)
+    local old = Workspace:FindFirstChild(name)
+    if old then
+        old:Destroy()
+    end
+
+    local model = Instance.new("Model")
+    model.Name = name
+    model.Parent = Workspace
+
+    local root = Instance.new("Part")
+    setPartBasics(root, "VisualRoot", Vector3.new(0.2, 0.2, 0.2), COLORS.Black, Enum.Material.SmoothPlastic, 1)
+    root.CFrame = CFrame.new(0, -1000, 0)
+    root.Parent = model
+    model.PrimaryPart = root
+
+    return model
 end
 
-local function getBaseParts(model)
-    local parts = {}
-    if not model then
-        return parts
-    end
-    for _, item in ipairs(model:GetDescendants()) do
-        if item:IsA("BasePart") then
-            table.insert(parts, item)
-        end
-    end
-    return parts
-end
-
-local function findBasePart(model, names)
-    if not model then
-        return nil
-    end
-    for _, name in ipairs(names) do
-        local found = model:FindFirstChild(name, true)
-        if found and found:IsA("BasePart") then
-            return found
-        end
-    end
-    return nil
-end
-
-local function getMotorJoints(model)
-    local joints = {}
-    for _, item in ipairs(model:GetDescendants()) do
-        if item:IsA("Motor6D") and item.Part0 and item.Part1 then
-            table.insert(joints, item)
-        end
-    end
-    return joints
-end
-
-local function makeRayParams(excludes)
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = excludes or {}
-    params.IgnoreWater = false
-    return params
-end
-
-local function raycastGround(position, excludes)
-    local origin = position + Vector3.new(0, CONFIG.GroundRayUp, 0)
-    local direction = Vector3.new(0, -(CONFIG.GroundRayUp + CONFIG.GroundRayDown), 0)
-    local result = Workspace:Raycast(origin, direction, makeRayParams(excludes))
-    if result then
-        return result.Position.Y, result
-    end
-    return position.Y - 3, nil
-end
-
--- Calcula a altura inferior do modelo em relação ao pivot, considerando a orientação das peças.
-local function calculateBottomOffset(model)
-    local pivot = model:GetPivot()
-    local lowest = 0
-    local foundPart = false
-    for _, part in ipairs(getBaseParts(model)) do
-        local localCF = pivot:ToObjectSpace(part.CFrame)
-        local halfHeight = math.abs(localCF.RightVector.Y) * part.Size.X * 0.5
-            + math.abs(localCF.UpVector.Y) * part.Size.Y * 0.5
-            + math.abs(localCF.LookVector.Y) * part.Size.Z * 0.5
-        local partBottom = localCF.Position.Y - halfHeight
-        if not foundPart or partBottom < lowest then
-            lowest = partBottom
-            foundPart = true
-        end
-    end
-    if not foundPart then
-        return -3
-    end
-    return lowest
-end
-
-local function getYaw(cf)
-    local _, yaw, _ = cf:ToOrientation()
-    return yaw
-end
-
-local function flatUnit(vector)
-    local flattened = Vector3.new(vector.X, 0, vector.Z)
-    if flattened.Magnitude < 0.001 then
-        return Vector3.zero
-    end
-    return flattened.Unit
-end
-
-local function getMoveVector()
-    -- Usa o mesmo vetor de controle do joystick padrão do Roblox, também no touch.
-    local ok, module = pcall(function()
-        local scripts = player:FindFirstChild("PlayerScripts")
-        local playerModule = scripts and scripts:FindFirstChild("PlayerModule")
-        if not playerModule then
-            return nil
-        end
-        return require(playerModule)
-    end)
-    if ok and module then
-        local okControls, controls = pcall(function()
-            return module:GetControls()
-        end)
-        if okControls and controls then
-            local okVector, vector = pcall(function()
-                return controls:GetMoveVector()
-            end)
-            if okVector and typeof(vector) == "Vector3" then
-                return vector
-            end
-        end
-    end
-    return Vector3.zero
-end
-
-local function getCameraRelativeDirection(moveVector)
-    if not camera then
-        return Vector3.zero
-    end
-    local cameraForward = flatUnit(camera.CFrame.LookVector)
-    local cameraRight = flatUnit(camera.CFrame.RightVector)
-    local result = cameraRight * moveVector.X + cameraForward * (-moveVector.Z)
-    if result.Magnitude > 1 then
-        result = result.Unit
-    end
-    return result
-end
-
-local function tweenCameraFOV(target, duration)
-    camera = Workspace.CurrentCamera or camera
-    if not camera then
-        return
-    end
-    safeCall(function()
-        TweenService:Create(
-            camera,
-            TweenInfo.new(duration or 0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-            { FieldOfView = target }
-        ):Play()
-    end)
-end
-
---==============================================================
--- 3. SOM, LUZES E EFEITOS
---==============================================================
-local function getSoundTemplate(soundName)
-    local folder = ReplicatedStorage:FindFirstChild(CONFIG.SoundsFolderName)
-    if not folder then
-        folder = ReplicatedStorage:FindFirstChild("MechaSounds")
-    end
-    if folder then
-        local sound = folder:FindFirstChild(soundName)
-        if sound and sound:IsA("Sound") then
-            return sound
-        end
-    end
-    return nil
-end
-
-local function stopLoopSound()
-    if activeLoopSound then
-        safeCall(function()
-            activeLoopSound:Stop()
-            activeLoopSound:Destroy()
-        end)
-        activeLoopSound = nil
-    end
-end
-
-local function playSound(soundName, parentPart, looped)
-    if not CONFIG.EnableSoundEffects or not parentPart then
-        return nil
-    end
-    local template = getSoundTemplate(soundName)
-    if not template then
-        return nil
-    end
-    local sound = template:Clone()
-    sound.Name = "Local_" .. soundName
-    sound.Looped = looped == true
-    sound.RollOffMaxDistance = math.max(sound.RollOffMaxDistance, 100)
-    sound.Parent = parentPart
-    local ok = pcall(function()
-        sound:Play()
-    end)
-    if not ok then
-        sound:Destroy()
-        return nil
-    end
-    if looped then
-        activeLoopSound = sound
+local function newPart(model, list, name, size, cf, color, material, shape, group, pivot, transparency, className)
+    local part
+    if className == "WedgePart" then
+        part = Instance.new("WedgePart")
     else
-        Debris:AddItem(sound, math.max(sound.TimeLength + 2, 5))
+        part = Instance.new("Part")
+        if shape then
+            part.Shape = shape
+        end
     end
-    return sound
+
+    setPartBasics(part, name, size, color, material, 1)
+    part.CFrame = cf
+    part.Parent = model
+
+    local index = #list + 1
+    -- Dispersão determinística: não usa math.random dentro do loop de renderização.
+    local scatterX = math.sin(index * 12.37 + #name) * (1.6 + (index % 3) * 0.55)
+    local scatterY = math.cos(index * 8.13 + #name) * (1.2 + (index % 4) * 0.40)
+    local scatterZ = math.sin(index * 5.71 + #name * 0.7) * (1.6 + (index % 5) * 0.35)
+    local scatter = CFrame.new(scatterX, scatterY, scatterZ)
+        * CFrame.Angles(math.rad((index * 31) % 130 - 65), math.rad((index * 47) % 180 - 90), math.rad((index * 23) % 100 - 50))
+
+    local item = {
+        part = part,
+        name = name,
+        baseCF = cf,
+        baseTransparency = transparency or 0,
+        group = group or "body",
+        pivot = pivot or Vector3.zero,
+        scatter = scatter,
+        index = index,
+    }
+    table.insert(list, item)
+    return part, item
 end
 
-local function getOrCreateAttachment(part, name, position)
-    local attachment = part:FindFirstChild(name)
-    if attachment and attachment:IsA("Attachment") then
-        return attachment
-    end
-    attachment = Instance.new("Attachment")
-    attachment.Name = name
-    attachment.Position = position or Vector3.zero
+local function addSparkEmitter(part, colorSequence, rate)
+    local attachment = Instance.new("Attachment")
+    attachment.Name = "GeneratedSparkAttachment"
     attachment.Parent = part
-    return attachment
-end
 
-local function addEmitter(attachment, name, texture, color, rate)
     local emitter = Instance.new("ParticleEmitter")
-    emitter.Name = name
-    emitter.Texture = texture
-    emitter.Color = ColorSequence.new(color)
-    emitter.LightEmission = 0.8
-    emitter.Brightness = 2
-    emitter.Lifetime = NumberRange.new(0.22, 0.65)
-    emitter.Speed = NumberRange.new(3, 10)
-    emitter.SpreadAngle = Vector2.new(160, 160)
+    emitter.Name = "GeneratedSparks"
+    emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+    emitter.Color = colorSequence or ColorSequence.new(COLORS.BlueLight, COLORS.Gold)
+    emitter.LightEmission = 0.85
+    emitter.LightInfluence = 0
+    emitter.Lifetime = NumberRange.new(0.18, 0.55)
+    emitter.Speed = NumberRange.new(3, 9)
+    emitter.Rate = rate or CFG.FX_LOW_PARTICLE_RATE
+    emitter.SpreadAngle = Vector2.new(180, 180)
     emitter.Rotation = NumberRange.new(0, 360)
-    emitter.RotSpeed = NumberRange.new(-160, 160)
+    emitter.RotSpeed = NumberRange.new(-180, 180)
     emitter.Size = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, 0.22),
-        NumberSequenceKeypoint.new(0.35, 0.12),
+        NumberSequenceKeypoint.new(0, 0.19),
+        NumberSequenceKeypoint.new(0.55, 0.10),
         NumberSequenceKeypoint.new(1, 0),
     })
     emitter.Transparency = NumberSequence.new({
         NumberSequenceKeypoint.new(0, 0.05),
-        NumberSequenceKeypoint.new(0.65, 0.2),
         NumberSequenceKeypoint.new(1, 1),
     })
-    emitter.Rate = rate or 0
     emitter.Enabled = false
     emitter.Parent = attachment
     return emitter
 end
 
-local function emitTransformEffects(rigData, amount)
-    if not CONFIG.EnableParticleEffects or not rigData or not rigData.effects then
-        return
-    end
-    for _, emitter in ipairs(rigData.effects.emitters or {}) do
-        if emitter and emitter.Parent then
-            safeCall(function()
-                emitter:Emit(amount or 14)
-            end)
-        end
-    end
+local function addSmokeEmitter(part)
+    local attachment = Instance.new("Attachment")
+    attachment.Name = "GeneratedSmokeAttachment"
+    attachment.Position = Vector3.new(0, -0.25, 0)
+    attachment.Parent = part
+
+    local emitter = Instance.new("ParticleEmitter")
+    emitter.Name = "GeneratedLandingSmoke"
+    emitter.Texture = "rbxasset://textures/particles/smoke_main.dds"
+    emitter.Color = ColorSequence.new(Color3.fromRGB(95, 108, 122), Color3.fromRGB(30, 36, 44))
+    emitter.LightInfluence = 0.2
+    emitter.Lifetime = NumberRange.new(0.45, 1.15)
+    emitter.Speed = NumberRange.new(2, 5)
+    emitter.Rate = 0
+    emitter.SpreadAngle = Vector2.new(35, 35)
+    emitter.Size = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.6),
+        NumberSequenceKeypoint.new(1, 2.1),
+    })
+    emitter.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.25),
+        NumberSequenceKeypoint.new(1, 1),
+    })
+    emitter.Enabled = false
+    emitter.Parent = attachment
+    return emitter
 end
 
-local function prepareMechaEffects(rigData)
-    if not rigData or not rigData.model then
-        return
-    end
-    local model = rigData.model
-    local chest = findBasePart(model, { "UpperTorso", "Torso", "Chest", "Body", "HumanoidRootPart" })
-    local leftShoulder = findBasePart(model, { "LeftUpperArm", "LeftArm", "LeftShoulder", "HumanoidRootPart" })
-    local rightShoulder = findBasePart(model, { "RightUpperArm", "RightArm", "RightShoulder", "HumanoidRootPart" })
-    local leftFoot = findBasePart(model, { "LeftFoot", "LeftLowerLeg", "LeftLeg", "HumanoidRootPart" })
-    local rightFoot = findBasePart(model, { "RightFoot", "RightLowerLeg", "RightLeg", "HumanoidRootPart" })
-    local head = findBasePart(model, { "Head" })
-    local effects = { emitters = {}, light = nil, selection = nil, trails = {} }
+local function createTrail(part, color)
+    local a0 = Instance.new("Attachment")
+    a0.Name = "TrailAttachmentA"
+    a0.Position = Vector3.new(0, 0.2, -0.35)
+    a0.Parent = part
 
-    if chest then
-        local reactorAttachment = getOrCreateAttachment(chest, "TE_ReactorAttachment", Vector3.new(0, 0, -chest.Size.Z * 0.52))
-        local light = Instance.new("PointLight")
-        light.Name = "TE_ReactorLight"
-        light.Color = CONFIG.AccentColor
-        light.Brightness = 1.6
-        light.Range = 22
-        light.Shadows = false
-        light.Parent = reactorAttachment
-        effects.light = light
-        table.insert(effects.emitters, addEmitter(reactorAttachment, "TE_ReactorSparks", CONFIG.SparkTexture, CONFIG.AccentColor, 0))
+    local a1 = Instance.new("Attachment")
+    a1.Name = "TrailAttachmentB"
+    a1.Position = Vector3.new(0, -0.2, -0.35)
+    a1.Parent = part
+
+    local trail = Instance.new("Trail")
+    trail.Name = "GeneratedMotionTrail"
+    trail.Attachment0 = a0
+    trail.Attachment1 = a1
+    trail.Color = ColorSequence.new(color or COLORS.BlueLight)
+    trail.LightEmission = 0.9
+    trail.Lifetime = 0.16
+    trail.MinLength = 0.05
+    trail.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.1),
+        NumberSequenceKeypoint.new(1, 1),
+    })
+    trail.Enabled = false
+    trail.Parent = part
+    return trail
+end
+
+local function buildPointLight(parent, color, range, brightness)
+    local light = Instance.new("PointLight")
+    light.Color = color
+    light.Range = range
+    light.Brightness = brightness
+    light.Shadows = false
+    light.Parent = parent
+    return light
+end
+
+---------------------------
+-- 3. CONSTRUÇÃO PROCEDURAL DO MECHA
+---------------------------
+local mechaModel = createVisualModel("__TransformerEngine_Mecha_" .. player.UserId)
+local mechaParts = {}
+local mechaEmitters = {}
+local mechaTrails = {}
+local mechaCoreLight = nil
+local mechaEyeParts = {}
+local mechaSmokeEmitters = {}
+
+local function buildMecha()
+    local m = mechaModel
+    local parts = mechaParts
+
+    local function B(name, size, x, y, z, color, material, group, pivot, rx, ry, rz, shape, transparency, className)
+        local cf = CFrame.new(x, y, z) * angleCF(rx, ry, rz)
+        local p = newPart(m, parts, name, size, cf, color, material, shape, group, pivot, transparency, className)
+        return p
     end
 
-    if leftShoulder then
-        local attachment = getOrCreateAttachment(leftShoulder, "TE_LeftShoulderFX", Vector3.new(0, leftShoulder.Size.Y * 0.45, 0))
-        table.insert(effects.emitters, addEmitter(attachment, "TE_LeftSparks", CONFIG.SparkTexture, CONFIG.WarningColor, 0))
+    local BODY = Vector3.zero
+    local LSH = Vector3.new(-1.48, 2.30, 0)
+    local RSH = Vector3.new(1.48, 2.30, 0)
+    local LHIP = Vector3.new(-0.65, -0.68, 0)
+    local RHIP = Vector3.new(0.65, -0.68, 0)
+    local HEAD = Vector3.new(0, 3.85, 0)
+
+    -- Coluna central, torso e placas abdominais.
+    B("Torso_Core", Vector3.new(2.05, 2.15, 1.05), 0, 1.95, 0.05, COLORS.Dark, Enum.Material.Metal)
+    B("Chest_Outer_Armor", Vector3.new(2.60, 1.28, 1.18), 0, 2.72, -0.03, COLORS.Blue, Enum.Material.Metal)
+    B("Chest_Center_Plate", Vector3.new(0.72, 1.03, 0.18), 0, 2.63, -0.69, COLORS.Silver, Enum.Material.DiamondPlate)
+    B("Chest_Left_Red_Panel", Vector3.new(0.77, 1.05, 0.22), -0.82, 2.70, -0.69, COLORS.Red, Enum.Material.Metal, "body", BODY, 0, 0, -7)
+    B("Chest_Right_Red_Panel", Vector3.new(0.77, 1.05, 0.22), 0.82, 2.70, -0.69, COLORS.Red, Enum.Material.Metal, "body", BODY, 0, 0, 7)
+    B("Windshield_Left", Vector3.new(0.47, 0.72, 0.09), -0.82, 2.78, -0.83, COLORS.BlueGlass, Enum.Material.Glass, "body", BODY, 0, 0, -8)
+    B("Windshield_Right", Vector3.new(0.47, 0.72, 0.09), 0.82, 2.78, -0.83, COLORS.BlueGlass, Enum.Material.Glass, "body", BODY, 0, 0, 8)
+    B("Chest_Upper_Brow", Vector3.new(2.35, 0.20, 0.20), 0, 3.36, -0.62, COLORS.Silver, Enum.Material.Metal)
+    B("Abdominal_Plate_01", Vector3.new(1.55, 0.34, 0.83), 0, 1.27, -0.52, COLORS.Steel, Enum.Material.DiamondPlate)
+    B("Abdominal_Plate_02", Vector3.new(1.38, 0.28, 0.78), 0, 0.91, -0.55, COLORS.Dark, Enum.Material.Metal)
+    B("Abdominal_Plate_03", Vector3.new(1.18, 0.22, 0.70), 0, 0.62, -0.55, COLORS.Silver, Enum.Material.Metal)
+    B("Waist_Belt", Vector3.new(1.92, 0.35, 1.03), 0, 0.39, 0.02, COLORS.Blue, Enum.Material.Metal)
+    B("Belt_Core", Vector3.new(0.38, 0.25, 0.10), 0, 0.39, -0.57, COLORS.Gold, Enum.Material.Neon)
+
+    local core = B("Energon_Core", Vector3.new(0.50, 0.50, 0.23), 0, 2.52, -0.91, COLORS.BlueLight, Enum.Material.Neon, "body", BODY, 0, 0, 0, Enum.PartType.Ball)
+    mechaCoreLight = buildPointLight(core, COLORS.BlueLight, 13, 2.3)
+    table.insert(mechaEmitters, addSparkEmitter(core, ColorSequence.new(COLORS.BlueLight, COLORS.White), 2))
+
+    -- Costas e propulsores.
+    B("Backpack_Main", Vector3.new(1.75, 1.90, 0.72), 0, 2.02, 0.82, COLORS.Dark, Enum.Material.Metal)
+    B("Backpack_Left_Armor", Vector3.new(0.63, 1.45, 0.65), -0.67, 2.12, 1.04, COLORS.Blue, Enum.Material.Metal)
+    B("Backpack_Right_Armor", Vector3.new(0.63, 1.45, 0.65), 0.67, 2.12, 1.04, COLORS.Blue, Enum.Material.Metal)
+    B("Thruster_Left", Vector3.new(0.42, 1.15, 0.48), -0.67, 1.37, 1.13, COLORS.Steel, Enum.Material.Metal)
+    B("Thruster_Right", Vector3.new(0.42, 1.15, 0.48), 0.67, 1.37, 1.13, COLORS.Steel, Enum.Material.Metal)
+    B("Thruster_Left_Glow", Vector3.new(0.24, 0.15, 0.26), -0.67, 0.77, 1.13, COLORS.BlueLight, Enum.Material.Neon)
+    B("Thruster_Right_Glow", Vector3.new(0.24, 0.15, 0.26), 0.67, 0.77, 1.13, COLORS.BlueLight, Enum.Material.Neon)
+    B("Back_Spine", Vector3.new(0.36, 1.45, 0.28), 0, 1.95, 1.28, COLORS.Silver, Enum.Material.Metal)
+
+    -- Cabeça: capacete, máscara, olhos e antenas.
+    B("Head_Helmet", Vector3.new(0.88, 0.86, 0.74), 0, 3.98, 0, COLORS.Blue, Enum.Material.Metal, "head", HEAD)
+    B("Head_Crown", Vector3.new(0.65, 0.26, 0.61), 0, 4.44, 0.01, COLORS.Silver, Enum.Material.Metal, "head", HEAD)
+    B("Head_Faceplate", Vector3.new(0.62, 0.43, 0.20), 0, 3.78, -0.43, COLORS.Silver, Enum.Material.Metal, "head", HEAD)
+    local eyeL = B("Eye_Left", Vector3.new(0.23, 0.10, 0.08), -0.22, 4.03, -0.405, COLORS.BlueLight, Enum.Material.Neon, "head", HEAD)
+    local eyeR = B("Eye_Right", Vector3.new(0.23, 0.10, 0.08), 0.22, 4.03, -0.405, COLORS.BlueLight, Enum.Material.Neon, "head", HEAD)
+    table.insert(mechaEyeParts, eyeL)
+    table.insert(mechaEyeParts, eyeR)
+    B("Head_Cheek_Left", Vector3.new(0.17, 0.45, 0.25), -0.44, 3.88, -0.22, COLORS.Red, Enum.Material.Metal, "head", HEAD)
+    B("Head_Cheek_Right", Vector3.new(0.17, 0.45, 0.25), 0.44, 3.88, -0.22, COLORS.Red, Enum.Material.Metal, "head", HEAD)
+    B("Head_Antenna_Left", Vector3.new(0.13, 0.56, 0.13), -0.39, 4.51, 0.04, COLORS.Gold, Enum.Material.Metal, "head", HEAD, 0, 0, -9)
+    B("Head_Antenna_Right", Vector3.new(0.13, 0.56, 0.13), 0.39, 4.51, 0.04, COLORS.Gold, Enum.Material.Metal, "head", HEAD, 0, 0, 9)
+    B("Head_Back_Panel", Vector3.new(0.60, 0.48, 0.25), 0, 4.00, 0.41, COLORS.Dark, Enum.Material.Metal, "head", HEAD)
+
+    -- Ombros e braços articulados.
+    B("Shoulder_Joint_L", Vector3.new(0.74, 0.74, 0.74), -1.47, 2.29, 0, COLORS.Silver, Enum.Material.Metal, "leftArm", LSH, 0, 0, 0, Enum.PartType.Ball)
+    B("Shoulder_Joint_R", Vector3.new(0.74, 0.74, 0.74), 1.47, 2.29, 0, COLORS.Silver, Enum.Material.Metal, "rightArm", RSH, 0, 0, 0, Enum.PartType.Ball)
+    B("Shoulder_Armor_L", Vector3.new(1.18, 1.06, 1.12), -1.76, 2.55, 0.03, COLORS.Red, Enum.Material.Metal, "leftArm", LSH, 0, 0, -6)
+    B("Shoulder_Armor_R", Vector3.new(1.18, 1.06, 1.12), 1.76, 2.55, 0.03, COLORS.Red, Enum.Material.Metal, "rightArm", RSH, 0, 0, 6)
+    B("Shoulder_Cap_L", Vector3.new(0.91, 0.22, 0.86), -1.79, 3.11, -0.02, COLORS.Silver, Enum.Material.DiamondPlate, "leftArm", LSH)
+    B("Shoulder_Cap_R", Vector3.new(0.91, 0.22, 0.86), 1.79, 3.11, -0.02, COLORS.Silver, Enum.Material.DiamondPlate, "rightArm", RSH)
+    B("Shoulder_Stripe_L", Vector3.new(0.17, 0.74, 0.12), -2.14, 2.55, -0.55, COLORS.Gold, Enum.Material.Neon, "leftArm", LSH)
+    B("Shoulder_Stripe_R", Vector3.new(0.17, 0.74, 0.12), 2.14, 2.55, -0.55, COLORS.Gold, Enum.Material.Neon, "rightArm", RSH)
+    B("UpperArm_L", Vector3.new(0.80, 1.13, 0.83), -1.89, 1.67, 0, COLORS.Blue, Enum.Material.Metal, "leftArm", LSH, 0, 0, -3)
+    B("UpperArm_R", Vector3.new(0.80, 1.13, 0.83), 1.89, 1.67, 0, COLORS.Blue, Enum.Material.Metal, "rightArm", RSH, 0, 0, 3)
+    B("UpperArm_OuterPlate_L", Vector3.new(0.22, 0.83, 0.69), -2.30, 1.68, -0.03, COLORS.Silver, Enum.Material.Metal, "leftArm", LSH)
+    B("UpperArm_OuterPlate_R", Vector3.new(0.22, 0.83, 0.69), 2.30, 1.68, -0.03, COLORS.Silver, Enum.Material.Metal, "rightArm", RSH)
+    B("Elbow_L", Vector3.new(0.62, 0.38, 0.66), -1.93, 1.00, 0, COLORS.Dark, Enum.Material.Metal, "leftArm", LSH, 0, 0, 0, Enum.PartType.Ball)
+    B("Elbow_R", Vector3.new(0.62, 0.38, 0.66), 1.93, 1.00, 0, COLORS.Dark, Enum.Material.Metal, "rightArm", RSH, 0, 0, 0, Enum.PartType.Ball)
+    B("Forearm_L", Vector3.new(0.91, 1.05, 0.94), -1.98, 0.50, -0.02, COLORS.Red, Enum.Material.Metal, "leftArm", LSH, 0, 0, -2)
+    B("Forearm_R", Vector3.new(0.91, 1.05, 0.94), 1.98, 0.50, -0.02, COLORS.Red, Enum.Material.Metal, "rightArm", RSH, 0, 0, 2)
+    B("Forearm_Guard_L", Vector3.new(0.96, 0.20, 0.88), -1.98, 0.81, -0.50, COLORS.Silver, Enum.Material.DiamondPlate, "leftArm", LSH)
+    B("Forearm_Guard_R", Vector3.new(0.96, 0.20, 0.88), 1.98, 0.81, -0.50, COLORS.Silver, Enum.Material.DiamondPlate, "rightArm", RSH)
+    B("Wrist_L", Vector3.new(0.62, 0.30, 0.62), -1.98, -0.07, -0.03, COLORS.Silver, Enum.Material.Metal, "leftArm", LSH)
+    B("Wrist_R", Vector3.new(0.62, 0.30, 0.62), 1.98, -0.07, -0.03, COLORS.Silver, Enum.Material.Metal, "rightArm", RSH)
+    local handL = B("Hand_L", Vector3.new(0.72, 0.55, 0.74), -1.98, -0.43, -0.08, COLORS.Dark, Enum.Material.Metal, "leftArm", LSH)
+    local handR = B("Hand_R", Vector3.new(0.72, 0.55, 0.74), 1.98, -0.43, -0.08, COLORS.Dark, Enum.Material.Metal, "rightArm", RSH)
+    for _, fingerSpec in ipairs({
+        {"L", -1.98, "leftArm", LSH, -1},
+        {"R", 1.98, "rightArm", RSH, 1},
+    }) do
+        local side, x, groupName, pivot, sign = fingerSpec[1], fingerSpec[2], fingerSpec[3], fingerSpec[4], fingerSpec[5]
+        for finger = 1, 3 do
+            local fx = x + (finger - 2) * 0.20
+            B("Finger_" .. side .. "_" .. finger, Vector3.new(0.14, 0.29, 0.18), fx, -0.79, -0.12, COLORS.Silver, Enum.Material.Metal, groupName, pivot, 0, 0, 0)
+        end
+        B("Thumb_" .. side, Vector3.new(0.17, 0.30, 0.20), x + sign * 0.40, -0.45, -0.16, COLORS.Silver, Enum.Material.Metal, groupName, pivot, 0, 0, sign * 22)
     end
-    if rightShoulder then
-        local attachment = getOrCreateAttachment(rightShoulder, "TE_RightShoulderFX", Vector3.new(0, rightShoulder.Size.Y * 0.45, 0))
-        table.insert(effects.emitters, addEmitter(attachment, "TE_RightSparks", CONFIG.SparkTexture, CONFIG.AccentColor, 0))
+    table.insert(mechaEmitters, addSparkEmitter(handL, ColorSequence.new(COLORS.BlueLight, COLORS.Gold), 3))
+    table.insert(mechaEmitters, addSparkEmitter(handR, ColorSequence.new(COLORS.BlueLight, COLORS.Gold), 3))
+    table.insert(mechaTrails, createTrail(handL, COLORS.BlueLight))
+    table.insert(mechaTrails, createTrail(handR, COLORS.BlueLight))
+    local shoulderL = B("Shoulder_FX_Node_L", Vector3.new(0.18, 0.18, 0.18), -2.17, 2.50, -0.45, COLORS.BlueLight, Enum.Material.Neon, "leftArm", LSH, 0, 0, 0, Enum.PartType.Ball, 0.15)
+    local shoulderR = B("Shoulder_FX_Node_R", Vector3.new(0.18, 0.18, 0.18), 2.17, 2.50, -0.45, COLORS.BlueLight, Enum.Material.Neon, "rightArm", RSH, 0, 0, 0, Enum.PartType.Ball, 0.15)
+    table.insert(mechaEmitters, addSparkEmitter(shoulderL, ColorSequence.new(COLORS.Gold, COLORS.White), CFG.FX_PARTICLE_RATE))
+    table.insert(mechaEmitters, addSparkEmitter(shoulderR, ColorSequence.new(COLORS.Gold, COLORS.White), CFG.FX_PARTICLE_RATE))
+
+    -- Pernas: coxa, joelho, canela, pistões e pés grandes.
+    B("Hip_Joint_L", Vector3.new(0.78, 0.78, 0.82), -0.65, -0.68, 0, COLORS.Silver, Enum.Material.Metal, "leftLeg", LHIP, 0, 0, 0, Enum.PartType.Ball)
+    B("Hip_Joint_R", Vector3.new(0.78, 0.78, 0.82), 0.65, -0.68, 0, COLORS.Silver, Enum.Material.Metal, "rightLeg", RHIP, 0, 0, 0, Enum.PartType.Ball)
+    B("Thigh_L", Vector3.new(0.98, 1.10, 1.00), -0.70, -1.34, 0.03, COLORS.Red, Enum.Material.Metal, "leftLeg", LHIP, 0, 0, -2)
+    B("Thigh_R", Vector3.new(0.98, 1.10, 1.00), 0.70, -1.34, 0.03, COLORS.Red, Enum.Material.Metal, "rightLeg", RHIP, 0, 0, 2)
+    B("Thigh_FrontPlate_L", Vector3.new(0.66, 0.70, 0.16), -0.70, -1.31, -0.54, COLORS.Silver, Enum.Material.DiamondPlate, "leftLeg", LHIP)
+    B("Thigh_FrontPlate_R", Vector3.new(0.66, 0.70, 0.16), 0.70, -1.31, -0.54, COLORS.Silver, Enum.Material.DiamondPlate, "rightLeg", RHIP)
+    B("Knee_L", Vector3.new(0.76, 0.52, 0.78), -0.70, -1.94, -0.04, COLORS.Dark, Enum.Material.Metal, "leftLeg", LHIP, 0, 0, 0, Enum.PartType.Ball)
+    B("Knee_R", Vector3.new(0.76, 0.52, 0.78), 0.70, -1.94, -0.04, COLORS.Dark, Enum.Material.Metal, "rightLeg", RHIP, 0, 0, 0, Enum.PartType.Ball)
+    B("Knee_Cap_L", Vector3.new(0.52, 0.36, 0.18), -0.70, -1.94, -0.48, COLORS.Gold, Enum.Material.Metal, "leftLeg", LHIP)
+    B("Knee_Cap_R", Vector3.new(0.52, 0.36, 0.18), 0.70, -1.94, -0.48, COLORS.Gold, Enum.Material.Metal, "rightLeg", RHIP)
+    B("Shin_L", Vector3.new(1.00, 1.22, 1.06), -0.73, -2.56, 0.05, COLORS.Blue, Enum.Material.Metal, "leftLeg", LHIP, 0, 0, -2)
+    B("Shin_R", Vector3.new(1.00, 1.22, 1.06), 0.73, -2.56, 0.05, COLORS.Blue, Enum.Material.Metal, "rightLeg", RHIP, 0, 0, 2)
+    B("Shin_Armor_L", Vector3.new(0.74, 0.74, 0.15), -0.73, -2.51, -0.55, COLORS.Silver, Enum.Material.DiamondPlate, "leftLeg", LHIP)
+    B("Shin_Armor_R", Vector3.new(0.74, 0.74, 0.15), 0.73, -2.51, -0.55, COLORS.Silver, Enum.Material.DiamondPlate, "rightLeg", RHIP)
+    B("Shin_Side_L", Vector3.new(0.20, 0.82, 0.65), -1.25, -2.51, 0.05, COLORS.Red, Enum.Material.Metal, "leftLeg", LHIP)
+    B("Shin_Side_R", Vector3.new(0.20, 0.82, 0.65), 1.25, -2.51, 0.05, COLORS.Red, Enum.Material.Metal, "rightLeg", RHIP)
+    B("Ankle_L", Vector3.new(0.67, 0.34, 0.70), -0.73, -3.20, 0.04, COLORS.Steel, Enum.Material.Metal, "leftLeg", LHIP)
+    B("Ankle_R", Vector3.new(0.67, 0.34, 0.70), 0.73, -3.20, 0.04, COLORS.Steel, Enum.Material.Metal, "rightLeg", RHIP)
+    B("Foot_L", Vector3.new(1.20, 0.48, 1.48), -0.78, -3.39, -0.34, COLORS.Dark, Enum.Material.Metal, "leftLeg", LHIP)
+    B("Foot_R", Vector3.new(1.20, 0.48, 1.48), 0.78, -3.39, -0.34, COLORS.Dark, Enum.Material.Metal, "rightLeg", RHIP)
+    B("Foot_Toe_Plate_L", Vector3.new(0.94, 0.22, 0.55), -0.78, -3.31, -0.85, COLORS.Red, Enum.Material.Metal, "leftLeg", LHIP)
+    B("Foot_Toe_Plate_R", Vector3.new(0.94, 0.22, 0.55), 0.78, -3.31, -0.85, COLORS.Red, Enum.Material.Metal, "rightLeg", RHIP)
+    B("Foot_Light_L", Vector3.new(0.22, 0.10, 0.08), -0.78, -3.31, -1.14, COLORS.BlueLight, Enum.Material.Neon, "leftLeg", LHIP)
+    B("Foot_Light_R", Vector3.new(0.22, 0.10, 0.08), 0.78, -3.31, -1.14, COLORS.BlueLight, Enum.Material.Neon, "rightLeg", RHIP)
+    B("Piston_L", Vector3.new(0.20, 0.95, 0.20), -0.34, -2.51, 0.58, COLORS.Silver, Enum.Material.Metal, "leftLeg", LHIP, 0, 0, -8, Enum.PartType.Cylinder)
+    B("Piston_R", Vector3.new(0.20, 0.95, 0.20), 0.34, -2.51, 0.58, COLORS.Silver, Enum.Material.Metal, "rightLeg", RHIP, 0, 0, 8, Enum.PartType.Cylinder)
+
+    -- Pneus nas laterais dos ombros para reforçar a leitura veículo/robô.
+    B("Shoulder_Wheel_L", Vector3.new(0.95, 0.48, 0.95), -2.24, 2.23, 0.14, COLORS.Tire, Enum.Material.SmoothPlastic, "leftArm", LSH, 0, 0, 90, Enum.PartType.Cylinder)
+    B("Shoulder_Wheel_R", Vector3.new(0.95, 0.48, 0.95), 2.24, 2.23, 0.14, COLORS.Tire, Enum.Material.SmoothPlastic, "rightArm", RSH, 0, 0, 90, Enum.PartType.Cylinder)
+    B("Shoulder_Wheel_Hub_L", Vector3.new(0.43, 0.12, 0.43), -2.51, 2.23, 0.14, COLORS.Silver, Enum.Material.Metal, "leftArm", LSH, 0, 0, 90, Enum.PartType.Cylinder)
+    B("Shoulder_Wheel_Hub_R", Vector3.new(0.43, 0.12, 0.43), 2.51, 2.23, 0.14, COLORS.Silver, Enum.Material.Metal, "rightArm", RSH, 0, 0, 90, Enum.PartType.Cylinder)
+
+    -- Linhas de painel, parafusos e entradas de ar: muitos detalhes pequenos, mas baratos.
+    for i = 1, 4 do
+        local y = 2.98 - i * 0.12
+        B("Chest_Vent_L_" .. i, Vector3.new(0.28, 0.045, 0.04), -1.04, y, -0.82, COLORS.Dark, Enum.Material.Metal)
+        B("Chest_Vent_R_" .. i, Vector3.new(0.28, 0.045, 0.04), 1.04, y, -0.82, COLORS.Dark, Enum.Material.Metal)
     end
-    if leftFoot then
-        local attachment = getOrCreateAttachment(leftFoot, "TE_LeftFootSmoke", Vector3.new(0, -leftFoot.Size.Y * 0.48, 0))
-        table.insert(effects.emitters, addEmitter(attachment, "TE_LeftSmoke", CONFIG.SmokeTexture, Color3.fromRGB(160, 175, 190), 0))
-    end
-    if rightFoot then
-        local attachment = getOrCreateAttachment(rightFoot, "TE_RightFootSmoke", Vector3.new(0, -rightFoot.Size.Y * 0.48, 0))
-        table.insert(effects.emitters, addEmitter(attachment, "TE_RightSmoke", CONFIG.SmokeTexture, Color3.fromRGB(160, 175, 190), 0))
+    for i = 1, 3 do
+        B("Belt_Detail_" .. i, Vector3.new(0.13, 0.16, 0.05), (i - 2) * 0.24, 0.12, -0.55, COLORS.Gold, Enum.Material.Neon)
     end
 
-    -- Trilhas dos pulsos: só são criadas se existirem attachments com orientação adequada.
-    for _, armName in ipairs({ "LeftLowerArm", "RightLowerArm", "LeftHand", "RightHand" }) do
-        local arm = findBasePart(model, { armName })
-        if arm then
-            local a0 = getOrCreateAttachment(arm, "TE_TrailA", Vector3.new(0, arm.Size.Y * 0.4, 0))
-            local a1 = getOrCreateAttachment(arm, "TE_TrailB", Vector3.new(0, -arm.Size.Y * 0.4, 0))
-            local trail = Instance.new("Trail")
-            trail.Name = "TE_WristTrail_" .. armName
-            trail.Attachment0 = a0
-            trail.Attachment1 = a1
-            trail.Color = ColorSequence.new(CONFIG.AccentColor, CONFIG.WarningColor)
-            trail.Lifetime = 0.16
-            trail.LightEmission = 0.8
-            trail.Enabled = false
-            trail.Parent = arm
-            table.insert(effects.trails, trail)
+    -- Fumaça de pouso reutilizável nos pés.
+    local footL = nil
+    local footR = nil
+    for _, item in ipairs(parts) do
+        if item.name == "Foot_L" then footL = item.part end
+        if item.name == "Foot_R" then footR = item.part end
+    end
+    if footL then table.insert(mechaSmokeEmitters, addSmokeEmitter(footL)) end
+    if footR then table.insert(mechaSmokeEmitters, addSmokeEmitter(footR)) end
+end
+
+---------------------------
+-- 4. CONSTRUÇÃO PROCEDURAL DO VEÍCULO
+---------------------------
+local vehicleModel = createVisualModel("__TransformerEngine_Vehicle_" .. player.UserId)
+local vehicleParts = {}
+local vehicleEmitters = {}
+local vehicleLights = {}
+local vehicleWheelPivots = {}
+
+local function buildVehicle()
+    local m = vehicleModel
+    local parts = vehicleParts
+
+    local function B(name, size, x, y, z, color, material, group, pivot, rx, ry, rz, shape, transparency, className)
+        local cf = CFrame.new(x, y, z) * angleCF(rx, ry, rz)
+        local p = newPart(m, parts, name, size, cf, color, material, shape, group, pivot, transparency, className)
+        return p
+    end
+
+    B("Vehicle_Underframe", Vector3.new(2.85, 0.45, 5.60), 0, -0.55, 0.05, COLORS.Black, Enum.Material.Metal)
+    B("Vehicle_Chassis", Vector3.new(3.20, 0.62, 6.05), 0, -0.30, 0, COLORS.Dark, Enum.Material.Metal)
+    B("Vehicle_Cab_Main", Vector3.new(3.15, 1.25, 3.05), 0, 0.46, -0.73, COLORS.Red, Enum.Material.Metal)
+    B("Vehicle_Hood", Vector3.new(3.08, 0.45, 1.92), 0, 0.51, -2.48, COLORS.Blue, Enum.Material.Metal)
+    B("Vehicle_Hood_Center", Vector3.new(0.72, 0.13, 1.55), 0, 0.77, -2.45, COLORS.Silver, Enum.Material.DiamondPlate)
+    B("Vehicle_Hood_Stripe_L", Vector3.new(0.16, 0.07, 1.45), -0.95, 0.76, -2.47, COLORS.Gold, Enum.Material.Neon)
+    B("Vehicle_Hood_Stripe_R", Vector3.new(0.16, 0.07, 1.45), 0.95, 0.76, -2.47, COLORS.Gold, Enum.Material.Neon)
+    B("Vehicle_Roof", Vector3.new(2.75, 0.34, 1.85), 0, 1.31, -0.54, COLORS.Blue, Enum.Material.Metal)
+    B("Vehicle_Windshield", Vector3.new(2.55, 0.77, 0.10), 0, 0.92, -1.66, COLORS.Glass, Enum.Material.Glass, "body", Vector3.zero, -22, 0, 0, nil, 0.14)
+    B("Vehicle_Rear_Window", Vector3.new(2.45, 0.55, 0.10), 0, 0.94, 0.36, COLORS.Glass, Enum.Material.Glass, "body", Vector3.zero, 14, 0, 0, nil, 0.20)
+    B("Vehicle_Side_Window_L", Vector3.new(0.09, 0.56, 1.12), -1.59, 0.96, -0.62, COLORS.Glass, Enum.Material.Glass, "body", Vector3.zero, 0, 0, -5, nil, 0.16)
+    B("Vehicle_Side_Window_R", Vector3.new(0.09, 0.56, 1.12), 1.59, 0.96, -0.62, COLORS.Glass, Enum.Material.Glass, "body", Vector3.zero, 0, 0, 5, nil, 0.16)
+
+    -- Para-brisa com bordas e carroceria lateral.
+    B("Vehicle_A_Pillar_L", Vector3.new(0.15, 0.91, 0.17), -1.35, 0.91, -1.52, COLORS.Silver, Enum.Material.Metal, "body", Vector3.zero, -20, 0, -12)
+    B("Vehicle_A_Pillar_R", Vector3.new(0.15, 0.91, 0.17), 1.35, 0.91, -1.52, COLORS.Silver, Enum.Material.Metal, "body", Vector3.zero, -20, 0, 12)
+    B("Vehicle_Door_L", Vector3.new(0.18, 0.68, 1.55), -1.61, 0.28, -0.15, COLORS.Blue, Enum.Material.Metal)
+    B("Vehicle_Door_R", Vector3.new(0.18, 0.68, 1.55), 1.61, 0.28, -0.15, COLORS.Blue, Enum.Material.Metal)
+    B("Vehicle_Door_Handle_L", Vector3.new(0.07, 0.07, 0.30), -1.73, 0.36, -0.20, COLORS.Silver, Enum.Material.Metal)
+    B("Vehicle_Door_Handle_R", Vector3.new(0.07, 0.07, 0.30), 1.73, 0.36, -0.20, COLORS.Silver, Enum.Material.Metal)
+    B("Vehicle_Front_Bumper", Vector3.new(3.25, 0.30, 0.32), 0, -0.18, -3.40, COLORS.Silver, Enum.Material.Metal)
+    B("Vehicle_Front_Grille", Vector3.new(1.12, 0.46, 0.10), 0, 0.05, -3.34, COLORS.Black, Enum.Material.Metal)
+    B("Vehicle_Grille_Bar_1", Vector3.new(0.93, 0.055, 0.04), 0, 0.17, -3.405, COLORS.Silver, Enum.Material.Metal)
+    B("Vehicle_Grille_Bar_2", Vector3.new(0.93, 0.055, 0.04), 0, 0.04, -3.405, COLORS.Silver, Enum.Material.Metal)
+    B("Vehicle_Grille_Bar_3", Vector3.new(0.93, 0.055, 0.04), 0, -0.09, -3.405, COLORS.Silver, Enum.Material.Metal)
+    local headL = B("Vehicle_Headlight_L", Vector3.new(0.52, 0.24, 0.12), -1.07, 0.15, -3.35, COLORS.BlueLight, Enum.Material.Neon)
+    local headR = B("Vehicle_Headlight_R", Vector3.new(0.52, 0.24, 0.12), 1.07, 0.15, -3.35, COLORS.BlueLight, Enum.Material.Neon)
+    table.insert(vehicleLights, buildPointLight(headL, COLORS.BlueLight, 9, 1.3))
+    table.insert(vehicleLights, buildPointLight(headR, COLORS.BlueLight, 9, 1.3))
+    B("Vehicle_Tail_L", Vector3.new(0.47, 0.25, 0.10), -1.22, 0.12, 3.06, COLORS.RedLight, Enum.Material.Neon)
+    B("Vehicle_Tail_R", Vector3.new(0.47, 0.25, 0.10), 1.22, 0.12, 3.06, COLORS.RedLight, Enum.Material.Neon)
+    B("Vehicle_Rear_Bumper", Vector3.new(3.14, 0.25, 0.30), 0, -0.20, 3.17, COLORS.Steel, Enum.Material.Metal)
+    B("Vehicle_Side_Skirt_L", Vector3.new(0.18, 0.20, 2.55), -1.62, -0.33, 0.08, COLORS.Silver, Enum.Material.Metal)
+    B("Vehicle_Side_Skirt_R", Vector3.new(0.18, 0.20, 2.55), 1.62, -0.33, 0.08, COLORS.Silver, Enum.Material.Metal)
+    B("Vehicle_Roof_Lightbar", Vector3.new(1.28, 0.10, 0.18), 0, 1.54, -0.45, COLORS.BlueLight, Enum.Material.Neon)
+    B("Vehicle_Mirror_L", Vector3.new(0.30, 0.20, 0.24), -1.79, 0.80, -1.13, COLORS.Black, Enum.Material.Metal)
+    B("Vehicle_Mirror_R", Vector3.new(0.30, 0.20, 0.24), 1.79, 0.80, -1.13, COLORS.Black, Enum.Material.Metal)
+    B("Vehicle_Exhaust_L", Vector3.new(0.22, 0.62, 0.22), -1.00, -0.48, 2.75, COLORS.Silver, Enum.Material.Metal, "body", Vector3.zero, 90, 0, 0, Enum.PartType.Cylinder)
+    B("Vehicle_Exhaust_R", Vector3.new(0.22, 0.62, 0.22), 1.00, -0.48, 2.75, COLORS.Silver, Enum.Material.Metal, "body", Vector3.zero, 90, 0, 0, Enum.PartType.Cylinder)
+    local exhaustL = B("Vehicle_Exhaust_Glow_L", Vector3.new(0.12, 0.12, 0.12), -1.00, -0.78, 2.75, COLORS.BlueLight, Enum.Material.Neon, "body", Vector3.zero, 0, 0, 0, Enum.PartType.Ball)
+    local exhaustR = B("Vehicle_Exhaust_Glow_R", Vector3.new(0.12, 0.12, 0.12), 1.00, -0.78, 2.75, COLORS.BlueLight, Enum.Material.Neon, "body", Vector3.zero, 0, 0, 0, Enum.PartType.Ball)
+    table.insert(vehicleEmitters, addSparkEmitter(exhaustL, ColorSequence.new(COLORS.BlueLight, COLORS.White), 2))
+    table.insert(vehicleEmitters, addSparkEmitter(exhaustR, ColorSequence.new(COLORS.BlueLight, COLORS.White), 2))
+
+    -- Quatro rodas geradas em código, com cubos centrais e parafusos.
+    local wheelSpecs = {
+        {"wheelFL", -1.48, -0.82, -2.02, -1},
+        {"wheelFR", 1.48, -0.82, -2.02, 1},
+        {"wheelRL", -1.48, -0.82, 2.02, -1},
+        {"wheelRR", 1.48, -0.82, 2.02, 1},
+    }
+    for _, spec in ipairs(wheelSpecs) do
+        local group, x, y, z, side = spec[1], spec[2], spec[3], spec[4], spec[5]
+        local pivot = Vector3.new(x, y, z)
+        vehicleWheelPivots[group] = pivot
+        B("Tire_" .. group, Vector3.new(1.30, 0.60, 1.30), x, y, z, COLORS.Tire, Enum.Material.SmoothPlastic, group, pivot, 0, 0, 90, Enum.PartType.Cylinder)
+        B("Hub_" .. group, Vector3.new(0.72, 0.14, 0.72), x + side * 0.34, y, z, COLORS.Silver, Enum.Material.Metal, group, pivot, 0, 0, 90, Enum.PartType.Cylinder)
+        B("Hub_Core_" .. group, Vector3.new(0.28, 0.16, 0.28), x + side * 0.43, y, z, COLORS.BlueLight, Enum.Material.Neon, group, pivot, 0, 0, 90, Enum.PartType.Cylinder)
+        for bolt = 1, 6 do
+            local a = (bolt / 6) * math.pi * 2
+            local by = y + math.cos(a) * 0.24
+            local bz = z + math.sin(a) * 0.24
+            B("WheelBolt_" .. group .. "_" .. bolt, Vector3.new(0.09, 0.09, 0.09), x + side * 0.45, by, bz, COLORS.Gold, Enum.Material.Metal, group, pivot, 0, 0, 0, Enum.PartType.Ball)
         end
     end
 
-    if head then
-        local box = Instance.new("SelectionBox")
-        box.Name = "TE_TransformationOutline"
-        box.Adornee = head
-        box.Color3 = CONFIG.AccentColor
-        box.LineThickness = 0.035
-        box.SurfaceTransparency = 0.94
-        box.Visible = false
-        box.Parent = model
-        effects.selection = box
-    end
-    rigData.effects = effects
+    -- Iluminação inferior discreta.
+    local underGlowL = B("Vehicle_UnderGlow_L", Vector3.new(0.38, 0.05, 2.10), -1.18, -0.70, 0.10, COLORS.BlueLight, Enum.Material.Neon, "body", Vector3.zero, 0, 0, 0, nil, 0.35)
+    local underGlowR = B("Vehicle_UnderGlow_R", Vector3.new(0.38, 0.05, 2.10), 1.18, -0.70, 0.10, COLORS.BlueLight, Enum.Material.Neon, "body", Vector3.zero, 0, 0, 0, nil, 0.35)
+    table.insert(vehicleLights, buildPointLight(underGlowL, COLORS.BlueLight, 7, 0.6))
+    table.insert(vehicleLights, buildPointLight(underGlowR, COLORS.BlueLight, 7, 0.6))
 end
 
---==============================================================
--- 4. INTERFACE MOBILE
---==============================================================
+safeCall(buildMecha)
+safeCall(buildVehicle)
+
+---------------------------
+-- 5. EFEITOS DE TELA E INTERFACE MOBILE
+---------------------------
 local oldGui = playerGui:FindFirstChild("TransformerEngineUI")
-if oldGui then
-    oldGui:Destroy()
-end
+if oldGui then oldGui:Destroy() end
 
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "TransformerEngineUI"
 screenGui.ResetOnSpawn = false
-screenGui.IgnoreGuiInset = true
-screenGui.DisplayOrder = 40
+screenGui.IgnoreGuiInset = false
+screenGui.DisplayOrder = 35
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = playerGui
 
-local mainPanel = Instance.new("Frame")
-mainPanel.Name = "StatusPanel"
-mainPanel.AnchorPoint = Vector2.new(0, 0)
-mainPanel.Position = UDim2.new(0, 16, 0, 16)
-mainPanel.Size = UDim2.new(0, 245, 0, 74)
-mainPanel.BackgroundColor3 = Color3.fromRGB(9, 16, 25)
-mainPanel.BackgroundTransparency = 0.13
-mainPanel.BorderSizePixel = 0
-mainPanel.Parent = screenGui
-local panelCorner = Instance.new("UICorner")
-panelCorner.CornerRadius = UDim.new(0, 10)
-panelCorner.Parent = mainPanel
-local panelStroke = Instance.new("UIStroke")
-panelStroke.Color = CONFIG.AccentColor
-panelStroke.Transparency = 0.22
-panelStroke.Thickness = 1.2
-panelStroke.Parent = mainPanel
+local blur = Lighting:FindFirstChild("TransformerEngine_Blur")
+if blur then blur:Destroy() end
+blur = Instance.new("BlurEffect")
+blur.Name = "TransformerEngine_Blur"
+blur.Size = 0
+blur.Parent = Lighting
 
-local panelTitle = Instance.new("TextLabel")
-panelTitle.Name = "Title"
-panelTitle.BackgroundTransparency = 1
-panelTitle.Position = UDim2.new(0, 12, 0, 7)
-panelTitle.Size = UDim2.new(1, -24, 0, 19)
-panelTitle.Font = Enum.Font.GothamBold
-panelTitle.Text = "TRANSFORMER ENGINE"
-panelTitle.TextColor3 = CONFIG.AccentColor
-panelTitle.TextSize = 13
-panelTitle.TextXAlignment = Enum.TextXAlignment.Left
-panelTitle.Parent = mainPanel
+local hud = Instance.new("Frame")
+hud.Name = "StatusPanel"
+hud.AnchorPoint = Vector2.new(0.5, 0)
+hud.Position = UDim2.new(0.5, 0, 0, 10)
+hud.Size = UDim2.new(0, 285, 0, 62)
+hud.BackgroundColor3 = Color3.fromRGB(8, 14, 24)
+hud.BackgroundTransparency = 0.18
+hud.BorderSizePixel = 0
+hud.Parent = screenGui
+local hudCorner = Instance.new("UICorner")
+hudCorner.CornerRadius = UDim.new(0, 10)
+hudCorner.Parent = hud
+local hudStroke = Instance.new("UIStroke")
+hudStroke.Color = COLORS.BlueLight
+hudStroke.Thickness = 1.2
+hudStroke.Transparency = 0.18
+hudStroke.Parent = hud
 
-local statusLabel = Instance.new("TextLabel")
-statusLabel.Name = "Status"
-statusLabel.BackgroundTransparency = 1
-statusLabel.Position = UDim2.new(0, 12, 0, 30)
-statusLabel.Size = UDim2.new(1, -24, 0, 18)
-statusLabel.Font = Enum.Font.GothamMedium
-statusLabel.Text = "SISTEMA ONLINE // HUMANO"
-statusLabel.TextColor3 = Color3.fromRGB(222, 235, 244)
-statusLabel.TextSize = 10
-statusLabel.TextXAlignment = Enum.TextXAlignment.Left
-statusLabel.Parent = mainPanel
+local title = Instance.new("TextLabel")
+title.Name = "EngineTitle"
+title.BackgroundTransparency = 1
+title.Position = UDim2.new(0, 12, 0, 5)
+title.Size = UDim2.new(1, -24, 0, 22)
+title.Font = Enum.Font.GothamBlack
+title.Text = "TRANSFORMER ENGINE"
+title.TextColor3 = COLORS.White
+title.TextSize = 15
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = hud
 
-local statusDetail = Instance.new("TextLabel")
-statusDetail.Name = "Detail"
-statusDetail.BackgroundTransparency = 1
-statusDetail.Position = UDim2.new(0, 12, 0, 49)
-statusDetail.Size = UDim2.new(1, -24, 0, 15)
-statusDetail.Font = Enum.Font.Code
-statusDetail.Text = "MOBILITY SYSTEM // READY"
-statusDetail.TextColor3 = Color3.fromRGB(128, 161, 180)
-statusDetail.TextSize = 9
-statusDetail.TextXAlignment = Enum.TextXAlignment.Left
-statusDetail.Parent = mainPanel
+local status = Instance.new("TextLabel")
+status.Name = "StatusText"
+status.BackgroundTransparency = 1
+status.Position = UDim2.new(0, 12, 0, 27)
+status.Size = UDim2.new(1, -24, 0, 18)
+status.Font = Enum.Font.GothamMedium
+status.Text = "SISTEMA ONLINE  •  HUMANOIDE"
+status.TextColor3 = COLORS.BlueLight
+status.TextSize = 10
+status.TextXAlignment = Enum.TextXAlignment.Left
+status.Parent = hud
 
-local progressBack = Instance.new("Frame")
-progressBack.Name = "ProgressBack"
-progressBack.AnchorPoint = Vector2.new(0, 0)
-progressBack.Position = UDim2.new(0, 16, 0, 99)
-progressBack.Size = UDim2.new(0, 245, 0, 5)
-progressBack.BackgroundColor3 = Color3.fromRGB(29, 42, 53)
-progressBack.BorderSizePixel = 0
-progressBack.Visible = false
-progressBack.Parent = screenGui
-local progressBackCorner = Instance.new("UICorner")
-progressBackCorner.CornerRadius = UDim.new(1, 0)
-progressBackCorner.Parent = progressBack
+local barBack = Instance.new("Frame")
+barBack.Name = "ProgressBack"
+barBack.Position = UDim2.new(0, 12, 1, -10)
+barBack.Size = UDim2.new(1, -24, 0, 3)
+barBack.BackgroundColor3 = Color3.fromRGB(38, 49, 64)
+barBack.BorderSizePixel = 0
+barBack.Visible = false
+barBack.Parent = hud
+local barFill = Instance.new("Frame")
+barFill.Name = "ProgressFill"
+barFill.Size = UDim2.new(0, 0, 1, 0)
+barFill.BackgroundColor3 = COLORS.BlueLight
+barFill.BorderSizePixel = 0
+barFill.Parent = barBack
 
-local progressFill = Instance.new("Frame")
-progressFill.Name = "ProgressFill"
-progressFill.Size = UDim2.fromScale(0, 1)
-progressFill.BackgroundColor3 = CONFIG.AccentColor
-progressFill.BorderSizePixel = 0
-progressFill.Parent = progressBack
-local progressFillCorner = Instance.new("UICorner")
-progressFillCorner.CornerRadius = UDim.new(1, 0)
-progressFillCorner.Parent = progressFill
+local buttonInfo = {
+    {form = FORMS.MECHA, text = "ROBÔ", color = COLORS.Blue, key = Enum.KeyCode.T},
+    {form = FORMS.VEICULO, text = "VEÍCULO", color = COLORS.Red, key = Enum.KeyCode.V},
+    {form = FORMS.HUMANOIDE, text = "HUMANO", color = COLORS.Steel, key = Enum.KeyCode.H},
+}
+local buttons = {}
 
-local function createActionButton(name, text, position, size, color)
+local function makeButton(info, index)
     local button = Instance.new("TextButton")
-    button.Name = name
-    button.AnchorPoint = Vector2.new(1, 1)
-    button.Position = position
-    button.Size = size
-    button.BackgroundColor3 = Color3.fromRGB(12, 24, 34)
-    button.BackgroundTransparency = 0.06
+    button.Name = "TransformTo_" .. info.form
+    button.AnchorPoint = Vector2.new(1, 0)
+    button.Position = UDim2.new(1, -12, 0.39, (index - 1) * 55)
+    button.Size = UDim2.new(0, 104, 0, 46)
+    button.BackgroundColor3 = Color3.fromRGB(9, 17, 29)
+    button.BackgroundTransparency = 0.10
     button.BorderSizePixel = 0
     button.AutoButtonColor = true
-    button.Font = Enum.Font.GothamBold
-    button.Text = text
-    button.TextColor3 = color or CONFIG.AccentColor
+    button.Font = Enum.Font.GothamBlack
+    button.Text = info.text
+    button.TextColor3 = COLORS.White
     button.TextSize = 12
-    button.TextWrapped = true
+    button.Selectable = false
     button.Parent = screenGui
+
     local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 12)
+    corner.CornerRadius = UDim.new(0, 9)
     corner.Parent = button
+
     local stroke = Instance.new("UIStroke")
-    stroke.Color = color or CONFIG.AccentColor
-    stroke.Transparency = 0.16
-    stroke.Thickness = 1.35
+    stroke.Name = "ButtonStroke"
+    stroke.Color = info.color
+    stroke.Thickness = 1.4
+    stroke.Transparency = 0.15
     stroke.Parent = button
-    return button
-end
 
--- Os botões ficam acima da área típica do botão de pulo do Roblox.
-local transformButton = createActionButton(
-    "TransformButton", "TRANSFORMAR", UDim2.new(1, -18, 1, -244), UDim2.new(0, 154, 0, 54), CONFIG.AccentColor
-)
-local humanButton = createActionButton(
-    "HumanButton", "VOLTAR AO HUMANO", UDim2.new(1, -18, 1, -180), UDim2.new(0, 154, 0, 43), Color3.fromRGB(255, 186, 97)
-)
-local jumpButton = createActionButton(
-    "JumpButton", "SALTO / BOOST", UDim2.new(1, -18, 1, -124), UDim2.new(0, 126, 0, 42), Color3.fromRGB(225, 240, 250)
-)
+    local line = Instance.new("Frame")
+    line.Name = "Accent"
+    line.BorderSizePixel = 0
+    line.BackgroundColor3 = info.color
+    line.Size = UDim2.new(0, 4, 0.70, 0)
+    line.Position = UDim2.new(0, 6, 0.15, 0)
+    line.Parent = button
+    local lineCorner = Instance.new("UICorner")
+    lineCorner.CornerRadius = UDim.new(1, 0)
+    lineCorner.Parent = line
 
-local blur = Lighting:FindFirstChild("TransformerEngineBlur")
-if not blur or not blur:IsA("BlurEffect") then
-    blur = Instance.new("BlurEffect")
-    blur.Name = "TransformerEngineBlur"
-    blur.Size = 0
-    blur.Parent = Lighting
-end
-
-local function setStatus(mainText, detailText, color)
-    statusLabel.Text = mainText or ""
-    statusDetail.Text = detailText or ""
-    if color then
-        statusLabel.TextColor3 = color
-    end
-end
-
-local function updateButtons()
-    if isBusy then
-        transformButton.Text = "TRANSFORMAÇÃO..."
-        transformButton.Active = false
-        transformButton.AutoButtonColor = false
-        humanButton.Active = false
-        humanButton.AutoButtonColor = false
-        jumpButton.Active = false
-        jumpButton.AutoButtonColor = false
-    else
-        transformButton.Active = true
-        transformButton.AutoButtonColor = true
-        humanButton.Active = true
-        humanButton.AutoButtonColor = true
-        jumpButton.Active = currentState == STATE_MECHA or currentState == STATE_VEHICLE
-        jumpButton.AutoButtonColor = jumpButton.Active
-        if currentState == STATE_HUMAN then
-            transformButton.Text = "INICIAR TRANSFORMAÇÃO"
-        elseif currentState == STATE_MECHA then
-            transformButton.Text = "TRANSFORMAR EM VEÍCULO"
-        else
-            transformButton.Text = "TRANSFORMAR EM ROBÔ"
+    button.Activated:Connect(function()
+        if not destroyed then
+            -- Botões Activated funcionam por toque e por mouse.
+            if _G.__TransformerEngineRequest then
+                _G.__TransformerEngineRequest(info.form)
+            end
         end
+    end)
+
+    buttons[info.form] = {button = button, stroke = stroke, info = info}
+end
+
+for i, info in ipairs(buttonInfo) do
+    makeButton(info, i)
+end
+
+local hint = Instance.new("TextLabel")
+hint.Name = "TouchHint"
+hint.AnchorPoint = Vector2.new(1, 0)
+hint.Position = UDim2.new(1, -12, 0.39, 166)
+hint.Size = UDim2.new(0, 150, 0, 22)
+hint.BackgroundTransparency = 1
+hint.Font = Enum.Font.Gotham
+hint.Text = "TOQUE PARA TRANSFORMAR"
+hint.TextColor3 = Color3.fromRGB(172, 192, 211)
+hint.TextSize = 8
+hint.TextXAlignment = Enum.TextXAlignment.Right
+hint.Parent = screenGui
+
+---------------------------
+-- 6. AVATAR ORIGINAL: CAPTURA E VISIBILIDADE LOCAL
+---------------------------
+local function capturePart(part)
+    if part:IsA("BasePart") and avatarParts[part] == nil then
+        avatarParts[part] = part.LocalTransparencyModifier
     end
 end
 
---==============================================================
--- 5. CAPTURA E RESTAURAÇÃO DO AVATAR HUMANO
---==============================================================
-local function captureHumanState()
-    character = player.Character or character
-    humanoid = character and character:FindFirstChildOfClass("Humanoid")
-    humanRoot = character and character:FindFirstChild("HumanoidRootPart")
-    if not character or not humanoid or not humanRoot then
-        return nil
+local function captureCharacter(char)
+    if descendantConnection then
+        descendantConnection:Disconnect()
+        descendantConnection = nil
     end
 
-    local cache = {
-        character = character,
-        humanoid = humanoid,
-        root = humanRoot,
-        rootCF = humanRoot.CFrame,
-        rootBottomOffset = 0,
-        parts = {},
-        motors = {},
-        humanoidProps = {
+    character = char
+    humanoid = char:WaitForChild("Humanoid", 12)
+    hrp = char:WaitForChild("HumanoidRootPart", 12)
+    avatarParts = {}
+
+    for _, descendant in ipairs(char:GetDescendants()) do
+        capturePart(descendant)
+    end
+
+    descendantConnection = char.DescendantAdded:Connect(function(descendant)
+        capturePart(descendant)
+        if form ~= FORMS.HUMANOIDE and descendant:IsA("BasePart") then
+            descendant.LocalTransparencyModifier = 1
+        end
+    end)
+
+    if humanoid then
+        normalProperties = {
             WalkSpeed = humanoid.WalkSpeed,
             JumpPower = humanoid.JumpPower,
             JumpHeight = humanoid.JumpHeight,
             UseJumpPower = humanoid.UseJumpPower,
             AutoRotate = humanoid.AutoRotate,
-            PlatformStand = humanoid.PlatformStand,
-            Sit = humanoid.Sit,
-        },
-        suspended = false,
-    }
-
-    for _, item in ipairs(character:GetDescendants()) do
-        if item:IsA("Motor6D") then
-            table.insert(cache.motors, {
-                motor = item,
-                enabled = item.Enabled,
-                transform = item.Transform,
-            })
-        end
+            CameraOffset = humanoid.CameraOffset,
+        }
     end
-
-    local lowest = 0
-    local hasBodyPart = false
-    for _, part in ipairs(getBaseParts(character)) do
-        local relative = humanRoot.CFrame:ToObjectSpace(part.CFrame)
-        local halfHeight = math.abs(relative.RightVector.Y) * part.Size.X * 0.5
-            + math.abs(relative.UpVector.Y) * part.Size.Y * 0.5
-            + math.abs(relative.LookVector.Y) * part.Size.Z * 0.5
-        local partBottom = relative.Position.Y - halfHeight
-        -- Acessórios não devem definir a altura da origem humana.
-        local isCoreBody = part.Name == "HumanoidRootPart" or part.Name == "Head"
-            or part.Name == "UpperTorso" or part.Name == "LowerTorso"
-            or string.find(part.Name, "Arm") or string.find(part.Name, "Leg")
-            or string.find(part.Name, "Hand") or string.find(part.Name, "Foot")
-        if isCoreBody then
-            if not hasBodyPart or partBottom < lowest then
-                lowest = partBottom
-                hasBodyPart = true
-            end
-        end
-        table.insert(cache.parts, {
-            part = part,
-            anchored = part.Anchored,
-            canCollide = part.CanCollide,
-            canTouch = part.CanTouch,
-            canQuery = part.CanQuery,
-            massless = part.Massless,
-            transparency = part.Transparency,
-            localTransparencyModifier = part.LocalTransparencyModifier,
-            relativeCF = relative,
-            startCF = part.CFrame,
-        })
-    end
-    cache.rootBottomOffset = hasBodyPart and lowest or -2.8
-    return cache
 end
 
-local function suspendHuman()
-    if humanCache and humanCache.suspended then
-        return true
-    end
-    humanCache = captureHumanState()
-    if not humanCache then
-        setStatus("AVATAR NÃO ENCONTRADO", "AGUARDANDO PERSONAGEM R15", CONFIG.WarningColor)
-        return false
-    end
-    humanoid = humanCache.humanoid
-    humanRoot = humanCache.root
-    for _, jointData in ipairs(humanCache.motors) do
-        if jointData.motor and jointData.motor.Parent then
-            jointData.motor.Enabled = false
-        end
-    end
-    for _, partData in ipairs(humanCache.parts) do
-        local part = partData.part
+local function setAvatarVisible(visibleAmount)
+    visibleAmount = clamp01(visibleAmount)
+    for part, original in pairs(avatarParts) do
         if part and part.Parent then
-            part.Anchored = true
-            part.CanCollide = false
-            part.CanTouch = false
-            part.LocalTransparencyModifier = 0
+            part.LocalTransparencyModifier = 1 - (1 - original) * visibleAmount
         end
     end
+end
+
+local function saveMovementIfNeeded()
+    if humanoid and not normalProperties then
+        normalProperties = {
+            WalkSpeed = humanoid.WalkSpeed,
+            JumpPower = humanoid.JumpPower,
+            JumpHeight = humanoid.JumpHeight,
+            UseJumpPower = humanoid.UseJumpPower,
+            AutoRotate = humanoid.AutoRotate,
+            CameraOffset = humanoid.CameraOffset,
+        }
+    end
+end
+
+local function applyFormMovement(target)
+    if not humanoid then return end
+    saveMovementIfNeeded()
+
+    if target == FORMS.HUMANOIDE then
+        if normalProperties then
+            humanoid.WalkSpeed = normalProperties.WalkSpeed or CFG.HUMANOID_SPEED
+            humanoid.UseJumpPower = normalProperties.UseJumpPower
+            humanoid.JumpPower = normalProperties.JumpPower or 50
+            humanoid.JumpHeight = normalProperties.JumpHeight or 7.2
+            humanoid.AutoRotate = normalProperties.AutoRotate ~= false
+            humanoid.CameraOffset = normalProperties.CameraOffset or Vector3.zero
+        else
+            humanoid.WalkSpeed = CFG.HUMANOID_SPEED
+            humanoid.JumpPower = 50
+            humanoid.JumpHeight = 7.2
+            humanoid.AutoRotate = true
+        end
+    elseif target == FORMS.MECHA then
+        humanoid.WalkSpeed = CFG.MECHA_SPEED
+        humanoid.JumpPower = CFG.MECHA_JUMP_POWER
+        humanoid.JumpHeight = CFG.MECHA_JUMP_HEIGHT
+        humanoid.AutoRotate = true
+        humanoid.CameraOffset = Vector3.new(0, 1.0, 0)
+    elseif target == FORMS.VEICULO then
+        humanoid.WalkSpeed = CFG.VEHICLE_SPEED
+        humanoid.JumpPower = 0
+        humanoid.JumpHeight = 0
+        humanoid.AutoRotate = true
+        humanoid.CameraOffset = Vector3.new(0, 0.15, 0)
+    end
+end
+
+---------------------------
+-- 7. ANIMAÇÃO PROCEDURAL DAS PEÇAS
+---------------------------
+local function groupTransform(item, mode, phase, moving, cameraLocalLook, now)
+    local group = item.group
+    local pivot = item.pivot or Vector3.zero
+    local rx, ry, rz = 0, 0, 0
+
+    if mode == FORMS.MECHA then
+        if group == "leftArm" then
+            rx = moving and math.sin(phase + math.pi) * CFG.WALK_SWAY or math.sin(now * 1.15) * 0.025
+            rz = moving and -0.06 or math.sin(now * 0.8) * 0.018
+        elseif group == "rightArm" then
+            rx = moving and math.sin(phase) * CFG.WALK_SWAY or math.sin(now * 1.15 + 1) * 0.025
+            rz = moving and 0.06 or math.sin(now * 0.8 + 1) * 0.018
+        elseif group == "leftLeg" then
+            rx = moving and math.sin(phase) * 0.46 or 0
+        elseif group == "rightLeg" then
+            rx = moving and math.sin(phase + math.pi) * 0.46 or 0
+        elseif group == "head" then
+            ry = math.clamp(-cameraLocalLook.X * 0.43, -0.52, 0.52)
+            rx = math.clamp(cameraLocalLook.Y * 0.20, -0.18, 0.18)
+        end
+    elseif mode == FORMS.VEICULO then
+        if string.sub(group, 1, 5) == "wheel" then
+            local spin = wheelPhase
+            local steer = 0
+            if group == "wheelFL" or group == "wheelFR" then
+                steer = moving and math.clamp(-cameraLocalLook.X * 0.12, -0.24, 0.24) or 0
+            end
+            local base = CFrame.new(pivot)
+            return base * CFrame.Angles(spin, steer, 0) * CFrame.new(-pivot)
+        end
+    end
+
+    return CFrame.new(pivot) * CFrame.Angles(rx, ry, rz) * CFrame.new(-pivot)
+end
+
+local function updateModel(parts, rootCF, visible, assemble, mode, phase, moving, cameraLocalLook, now, bob)
+    visible = clamp01(visible)
+    assemble = clamp01(assemble)
+    if visible <= 0.002 then
+        -- Continua oculto sem recalcular centenas de CFrames.
+        for _, item in ipairs(parts) do
+            if item.part and item.part.Parent and item.part.Transparency < 0.999 then
+                item.part.Transparency = 1
+            end
+        end
+        return
+    end
+
+    local rootMotion = CFrame.new(0, bob or 0, 0)
+    for _, item in ipairs(parts) do
+        local p = item.part
+        if p and p.Parent then
+            local spread = item.scatter:Lerp(CFrame.new(), assemble)
+            local pose = groupTransform(item, mode, phase, moving, cameraLocalLook, now)
+            p.CFrame = rootCF * rootMotion * spread * pose * item.baseCF
+            p.Transparency = 1 - visible * (1 - item.baseTransparency)
+        end
+    end
+end
+
+local function setEffectsEnabled(enabled, vehicleEnabled)
+    for _, emitter in ipairs(mechaEmitters) do
+        if emitter and emitter.Parent then emitter.Enabled = enabled end
+    end
+    for _, trail in ipairs(mechaTrails) do
+        if trail and trail.Parent then trail.Enabled = enabled and vehicleEnabled == false end
+    end
+    for _, emitter in ipairs(mechaSmokeEmitters) do
+        if emitter and emitter.Parent then emitter.Enabled = false end
+    end
+    for _, emitter in ipairs(vehicleEmitters) do
+        if emitter and emitter.Parent then emitter.Enabled = enabled and vehicleEnabled == true end
+    end
+end
+
+local function emitTransformationBurst()
+    for _, emitter in ipairs(mechaEmitters) do
+        if emitter and emitter.Parent then safeCall(function() emitter:Emit(7) end) end
+    end
+    for _, emitter in ipairs(vehicleEmitters) do
+        if emitter and emitter.Parent then safeCall(function() emitter:Emit(5) end) end
+    end
+    for _, emitter in ipairs(mechaSmokeEmitters) do
+        if emitter and emitter.Parent then safeCall(function() emitter:Emit(10) end) end
+    end
+end
+
+---------------------------
+-- 8. CONTROLE DE ESTADO E TRANSFORMAÇÃO
+---------------------------
+local function updateButtonStates()
+    for target, entry in pairs(buttons) do
+        local selected = (not transition and form == target)
+        entry.stroke.Thickness = selected and 2.6 or 1.2
+        entry.stroke.Transparency = selected and 0 or 0.22
+        entry.button.BackgroundColor3 = selected and Color3.fromRGB(21, 40, 60) or Color3.fromRGB(9, 17, 29)
+        entry.button.TextTransparency = transition and 0.28 or 0
+    end
+end
+
+local function requestForm(target)
+    if destroyed or transition or not buttons[target] then return end
+    if target == form then return end
+    if not humanoid or not hrp or humanoid.Health <= 0 then
+        status.Text = "AGUARDANDO AVATAR..."
+        status.TextColor3 = COLORS.Gold
+        return
+    end
+
+    saveMovementIfNeeded()
+    transition = {
+        from = form,
+        to = target,
+        startTime = os.clock(),
+        duration = CFG.TRANSFORM_TIME,
+        progress = 0,
+    }
+
+    -- Imobilização suave durante o processo, sem ancorar o personagem.
     humanoid.WalkSpeed = 0
     humanoid.JumpPower = 0
     humanoid.JumpHeight = 0
-    humanoid.AutoRotate = false
-    humanoid.Sit = false
-    humanoid.PlatformStand = true
-    humanCache.suspended = true
-    return true
+    humanoid:Move(Vector3.zero, true)
+    if hrp then
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+        lastRootCF = hrp.CFrame
+    end
+
+    status.Text = "SISTEMA DE TRANSFORMAÇÃO ATIVADO..."
+    status.TextColor3 = COLORS.Gold
+    barBack.Visible = true
+    barFill.Size = UDim2.new(0, 0, 1, 0)
+    updateButtonStates()
+    setEffectsEnabled(true, target == FORMS.VEICULO)
+    emitTransformationBurst()
 end
 
-local function getHumanFoldCFrame(partName)
-    local low = string.lower(partName)
-    if low == "humanoidrootpart" then
-        return CFrame.new(0, 0, 0)
-    elseif string.find(low, "head") then
-        return CFrame.new(0, 0.35, 0) * CFrame.Angles(0.1, 0, 0)
-    elseif string.find(low, "torso") then
-        return CFrame.new(0, 0, 0)
-    elseif string.find(low, "arm") or string.find(low, "hand") then
-        local sign = string.find(low, "left") and -1 or 1
-        return CFrame.new(sign * 0.22, 0.08, -0.12) * CFrame.Angles(0.2, 0, sign * 0.7)
-    elseif string.find(low, "leg") or string.find(low, "foot") then
-        local sign = string.find(low, "left") and -1 or 1
-        return CFrame.new(sign * 0.13, -0.22, 0.12) * CFrame.Angles(-0.25, 0, sign * 0.12)
-    end
-    return CFrame.new(0, 0, 0)
-end
+_G.__TransformerEngineRequest = requestForm
 
-local function animateHumanDisassembly(alpha, destinationPivot)
-    if not humanCache then
-        return
-    end
-    local ease = easeOutCubic(alpha)
-    for _, partData in ipairs(humanCache.parts) do
-        local part = partData.part
-        if part and part.Parent then
-            local compactCF = destinationPivot * getHumanFoldCFrame(part.Name)
-            part.CFrame = partData.startCF:Lerp(compactCF, ease)
-            part.LocalTransparencyModifier = ease
-        end
-    end
-end
+local function completeTransition()
+    if not transition then return end
+    local target = transition.to
+    form = target
+    transition = nil
+    applyFormMovement(form)
 
-local function placeHumanFolded(destinationPivot)
-    if not humanCache then
-        return
-    end
-    for _, partData in ipairs(humanCache.parts) do
-        local part = partData.part
-        if part and part.Parent then
-            part.CFrame = destinationPivot * getHumanFoldCFrame(part.Name)
-            part.LocalTransparencyModifier = 1
-            part.Anchored = true
-            part.CanCollide = false
-            part.CanTouch = false
-        end
-    end
-end
-
-local function animateHumanAssembly(alpha, destinationPivot)
-    if not humanCache then
-        return
-    end
-    local ease = easeOutBack(alpha)
-    ease = math.clamp(ease, 0, 1.08)
-    for _, partData in ipairs(humanCache.parts) do
-        local part = partData.part
-        if part and part.Parent then
-            local foldedCF = destinationPivot * getHumanFoldCFrame(part.Name)
-            local finalCF = destinationPivot * partData.relativeCF
-            part.CFrame = foldedCF:Lerp(finalCF, ease)
-            part.LocalTransparencyModifier = 1 - clamp01(alpha)
-        end
-    end
-end
-
-local function restoreHuman(destinationPivot)
-    if not humanCache then
-        return false
-    end
-    local cache = humanCache
-    character = cache.character
-    humanoid = cache.humanoid
-    humanRoot = cache.root
-    if not character or not character.Parent or not humanoid or not humanRoot or not humanRoot.Parent then
-        return false
-    end
-
-    -- Reposiciona as partes antes de reativar as juntas para evitar que fiquem espalhadas.
-    humanRoot.CFrame = destinationPivot
-    for _, partData in ipairs(cache.parts) do
-        local part = partData.part
-        if part and part.Parent then
-            part.CFrame = destinationPivot * partData.relativeCF
-        end
-    end
-    for _, jointData in ipairs(cache.motors) do
-        local motor = jointData.motor
-        if motor and motor.Parent then
-            motor.Transform = jointData.transform
-            motor.Enabled = jointData.enabled
-        end
-    end
-    for _, partData in ipairs(cache.parts) do
-        local part = partData.part
-        if part and part.Parent then
-            part.Anchored = partData.anchored
-            part.CanCollide = partData.canCollide
-            part.CanTouch = partData.canTouch
-            part.CanQuery = partData.canQuery
-            part.Massless = partData.massless
-            part.LocalTransparencyModifier = partData.localTransparencyModifier
-        end
-    end
-
-    local props = cache.humanoidProps
-    humanoid.WalkSpeed = props.WalkSpeed
-    humanoid.JumpPower = props.JumpPower
-    humanoid.JumpHeight = props.JumpHeight
-    humanoid.UseJumpPower = props.UseJumpPower
-    humanoid.AutoRotate = props.AutoRotate
-    humanoid.PlatformStand = props.PlatformStand
-    humanoid.Sit = props.Sit
-    safeCall(function()
-        humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-    end)
-    cache.suspended = false
-    camera = Workspace.CurrentCamera or camera
-    if camera then
-        camera.CameraSubject = humanoid
-    end
-    tweenCameraFOV(CONFIG.HumanFOV, 0.55)
-    return true
-end
-
---==============================================================
--- 6. PREPARAÇÃO DOS MODELOS MECHA E VEÍCULO
---==============================================================
-local function resolveTemplate(templateName)
-    local template = ReplicatedStorage:FindFirstChild(templateName)
-    if template and template:IsA("Model") then
-        return template
-    end
-    return nil
-end
-
-local function prepareMechaModel(spawnPivot, exploded)
-    local template = resolveTemplate(CONFIG.MechaTemplateName)
-    if not template then
-        return nil, "ReplicatedStorage.MechaRig não foi encontrado"
-    end
-    local model = template:Clone()
-    model.Name = "Local_Transformer_Mecha"
-    local root = model:FindFirstChild("HumanoidRootPart", true)
-    if not root or not root:IsA("BasePart") then
-        model:Destroy()
-        return nil, "MechaRig precisa ter uma BasePart HumanoidRootPart"
-    end
-    model.PrimaryPart = root
-    model.Parent = Workspace
-    model:PivotTo(spawnPivot)
-
-    local parts = getBaseParts(model)
-    -- A altura é medida na pose-base, antes de aplicar offsets de montagem.
-    local bottomOffset = calculateBottomOffset(model)
-    local localParts = {}
-    local transparency = {}
-    for _, part in ipairs(parts) do
-        localParts[part] = spawnPivot:ToObjectSpace(part.CFrame)
-        transparency[part] = part.Transparency
-        part.CanCollide = false
-        part.CanTouch = false
-        part.Massless = true
-        part.LocalTransparencyModifier = exploded and 1 or 0
-        part.Anchored = part == root
-    end
-
-    local humanoidInRig = model:FindFirstChildOfClass("Humanoid")
-    if humanoidInRig then
-        humanoidInRig.AutoRotate = false
-        humanoidInRig.WalkSpeed = 0
-        humanoidInRig.JumpPower = 0
-        humanoidInRig.PlatformStand = true
-        humanoidInRig.BreakJointsOnDeath = false
-    end
-
-    local motors = getMotorJoints(model)
-    local motorData = {}
-    for index, motor in ipairs(motors) do
-        local baseTransform = motor.Transform
-        local offset = CFrame.new(
-            math.sin(index * 2.17) * 2.8,
-            math.cos(index * 1.31) * 2.4,
-            math.sin(index * 0.77) * 2.6
-        ) * CFrame.Angles(math.rad((index % 3 - 1) * 45), math.rad((index % 4 - 2) * 40), math.rad((index % 5 - 2) * 28))
-        local startTransform = exploded and (baseTransform * offset) or baseTransform
-        table.insert(motorData, {
-            motor = motor,
-            base = baseTransform,
-            start = startTransform,
-            enabled = motor.Enabled,
-        })
-        motor.Transform = startTransform
-        motor.Enabled = true
-    end
-
-    local data = {
-        kind = STATE_MECHA,
-        model = model,
-        root = root,
-        humanoid = humanoidInRig,
-        bottomOffset = bottomOffset,
-        localParts = localParts,
-        transparency = transparency,
-        motors = motorData,
-        pivot = spawnPivot,
-        effects = nil,
-        tracks = {},
-        activeTrackName = nil,
-        transitionSequenceActive = false,
-        baseYaw = getYaw(spawnPivot),
-    }
-    prepareMechaEffects(data)
-    return data
-end
-
-local function prepareVehicleModel(spawnPivot, exploded)
-    local template = resolveTemplate(CONFIG.VehicleTemplateName)
-    if not template then
-        return nil, "ReplicatedStorage.VehicleRig não foi encontrado"
-    end
-    local model = template:Clone()
-    model.Name = "Local_Transformer_Vehicle"
-    local primary = model.PrimaryPart
-        or findBasePart(model, { "VehicleRoot", "Chassis", "Root", "HumanoidRootPart" })
-    if not primary then
-        model:Destroy()
-        return nil, "VehicleRig precisa ter PrimaryPart ou uma peça VehicleRoot/Chassis"
-    end
-    model.PrimaryPart = primary
-    model.Parent = Workspace
-    model:PivotTo(spawnPivot)
-
-    local localParts = {}
-    local transparency = {}
-    local foldedParts = {}
-    local wheels = {}
-    for index, part in ipairs(getBaseParts(model)) do
-        local localCF = spawnPivot:ToObjectSpace(part.CFrame)
-        localParts[part] = localCF
-        transparency[part] = part.Transparency
-        local foldedPosition = localCF.Position * 0.22
-        foldedParts[part] = CFrame.new(foldedPosition) * localCF.Rotation
-        part.Anchored = true
-        part.CanCollide = false
-        part.CanTouch = false
-        part.Massless = true
-        part.LocalTransparencyModifier = exploded and 1 or 0
-        if string.find(string.lower(part.Name), "wheel") or string.find(string.lower(part.Name), "tire") then
-            table.insert(wheels, { part = part, localCF = localCF, index = index })
-        end
-    end
-
-    local data = {
-        kind = STATE_VEHICLE,
-        model = model,
-        root = primary,
-        humanoid = nil,
-        bottomOffset = calculateBottomOffset(model),
-        localParts = localParts,
-        transparency = transparency,
-        foldedParts = foldedParts,
-        wheels = wheels,
-        pivot = spawnPivot,
-        effects = { emitters = {}, light = nil, selection = nil, trails = {} },
-        baseYaw = getYaw(spawnPivot),
-    }
-    local glowPart = findBasePart(model, { "Headlights", "Headlight", "FrontLights", "VehicleRoot", "Chassis" }) or primary
-    local attach = getOrCreateAttachment(glowPart, "TE_VehicleFX", Vector3.new(0, 0, -glowPart.Size.Z * 0.5))
-    local light = Instance.new("PointLight")
-    light.Name = "TE_VehicleGlow"
-    light.Color = CONFIG.AccentColor
-    light.Brightness = 0.85
-    light.Range = 14
-    light.Shadows = false
-    light.Parent = attach
-    data.effects.light = light
-    table.insert(data.effects.emitters, addEmitter(attach, "TE_VehicleSparks", CONFIG.SparkTexture, CONFIG.AccentColor, 0))
-    return data
-end
-
-local function setRigVisibility(rigData, alpha)
-    if not rigData then
-        return
-    end
-    for _, part in ipairs(getBaseParts(rigData.model)) do
-        part.LocalTransparencyModifier = alpha
-    end
-end
-
-local function setExplodedPose(rigData)
-    if not rigData then
-        return
-    end
-    if rigData.kind == STATE_MECHA then
-        for _, motorData in ipairs(rigData.motors) do
-            if motorData.motor and motorData.motor.Parent then
-                motorData.motor.Transform = motorData.start
-            end
-        end
-        setRigVisibility(rigData, 1)
-    elseif rigData.kind == STATE_VEHICLE then
-        local index = 0
-        for part, localCF in pairs(rigData.localParts) do
-            if part and part.Parent then
-                index += 1
-                local offset = CFrame.new(
-                    math.sin(index * 1.7) * 3,
-                    math.cos(index * 2.3) * 2.4,
-                    math.sin(index * 1.2) * 3.2
-                ) * CFrame.Angles(math.rad(index * 13 % 90), math.rad(index * 23 % 120), math.rad(index * 17 % 70))
-                part.CFrame = rigData.pivot * offset * localCF
-                part.LocalTransparencyModifier = 1
-            end
-        end
-    end
-end
-
-local function animateTargetBuild(rigData, alpha)
-    if not rigData then
-        return
-    end
-    if rigData.kind == STATE_MECHA then
-        local ease = easeOutBack(alpha)
-        ease = math.clamp(ease, 0, 1.08)
-        if not rigData.transitionSequenceActive then
-            for _, motorData in ipairs(rigData.motors) do
-                local motor = motorData.motor
-                if motor and motor.Parent then
-                    motor.Transform = motorData.start:Lerp(motorData.base, ease)
-                end
-            end
-        end
-        local visibleAlpha = clamp01(alpha)
-        for part in pairs(rigData.localParts) do
-            if part and part.Parent then
-                part.LocalTransparencyModifier = 1 - visibleAlpha
-            end
-        end
-        if rigData.effects and rigData.effects.selection then
-            rigData.effects.selection.Visible = alpha < 0.95
-        end
-    elseif rigData.kind == STATE_VEHICLE then
-        local ease = easeOutBack(alpha)
-        ease = math.clamp(ease, 0, 1.08)
-        for part, localCF in pairs(rigData.localParts) do
-            if part and part.Parent then
-                local foldedCF = rigData.foldedParts[part] or localCF
-                part.CFrame = rigData.pivot * foldedCF:Lerp(localCF, ease)
-                part.LocalTransparencyModifier = 1 - clamp01(alpha)
-            end
-        end
-    end
-end
-
-local function animateSourceCollapse(rigData, alpha)
-    if not rigData then
-        return
-    end
-    local ease = easeOutCubic(alpha)
-    if rigData.kind == STATE_MECHA then
-        if not rigData.transitionSequenceActive then
-            for _, motorData in ipairs(rigData.motors) do
-                local motor = motorData.motor
-                if motor and motor.Parent then
-                    local inward = CFrame.new(0, -0.5, 0.45) * CFrame.Angles(math.rad(16), 0, math.rad(12))
-                    motor.Transform = motorData.base:Lerp(motorData.base * inward, ease)
-                end
-            end
-        end
-        for part in pairs(rigData.localParts) do
-            if part and part.Parent then
-                part.LocalTransparencyModifier = ease
-            end
-        end
-    elseif rigData.kind == STATE_VEHICLE then
-        for part, localCF in pairs(rigData.localParts) do
-            if part and part.Parent then
-                local foldedCF = rigData.foldedParts[part] or (CFrame.new(localCF.Position * 0.22) * localCF.Rotation)
-                part.CFrame = rigData.pivot * localCF:Lerp(foldedCF, ease)
-                part.LocalTransparencyModifier = ease
-            end
-        end
-    end
-    if rigData.effects then
-        if rigData.effects.selection then
-            rigData.effects.selection.Visible = alpha < 0.4
-        end
-        if rigData.effects.light then
-            rigData.effects.light.Brightness = 1.5 * (1 - ease)
-        end
-    end
-end
-
---==============================================================
--- 7. ANIMAÇÕES PRÉ-GRAVADAS OPCIONAIS
---==============================================================
-local function loadAuthoredAnimations(rigData)
-    if not CONFIG.AutoPlayAuthoredAnimations or not rigData or rigData.kind ~= STATE_MECHA then
-        return
-    end
-    local folder = ReplicatedStorage:FindFirstChild(CONFIG.AnimationsFolderName)
-    if not folder then
-        return
-    end
-    local animator = rigData.humanoid and rigData.humanoid:FindFirstChildOfClass("Animator")
-    if not animator and rigData.humanoid then
-        animator = Instance.new("Animator")
-        animator.Parent = rigData.humanoid
-    end
-    if not animator then
-        return
-    end
-    for _, name in ipairs({ "MechaIdle", "MechaWalk", "MechaRun", "MechaJump", "TransformationSequence" }) do
-        local animation = folder:FindFirstChild(name)
-        if animation and animation:IsA("Animation") and animation.AnimationId ~= "" then
-            local ok, track = pcall(function()
-                return animator:LoadAnimation(animation)
-            end)
-            if ok and track then
-                track.Looped = name ~= "MechaJump" and name ~= "TransformationSequence"
-                if name == "MechaIdle" then
-                    track.Priority = Enum.AnimationPriority.Idle
-                elseif name == "TransformationSequence" then
-                    track.Priority = Enum.AnimationPriority.Action
-                else
-                    track.Priority = Enum.AnimationPriority.Movement
-                end
-                rigData.tracks[name] = track
-            end
-        end
-    end
-end
-
-local function playTransformationTrack(rigData)
-    if not rigData or not rigData.tracks then
-        return false
-    end
-    local track = rigData.tracks.TransformationSequence
-    if not track then
-        return false
-    end
-    for name, otherTrack in pairs(rigData.tracks) do
-        if name ~= "TransformationSequence" and otherTrack.IsPlaying then
-            safeCall(function() otherTrack:Stop(0.12) end)
-        end
-    end
-    rigData.transitionSequenceActive = true
-    safeCall(function()
-        track.TimePosition = 0
-        track:Play(0.12, 1, 1)
-    end)
-    return true
-end
-
-local function changeMechaTrack(rigData, desiredName)
-    if not rigData or not rigData.tracks then
-        return false
-    end
-    local desired = rigData.tracks[desiredName]
-    if not desired then
-        -- Se o rig não possuir uma animação para esse estado, interrompe a faixa anterior
-        -- para que a animação procedural possa assumir o controle das juntas.
-        for _, track in pairs(rigData.tracks) do
-            if track.IsPlaying then
-                safeCall(function() track:Stop(0.18) end)
-            end
-        end
-        rigData.activeTrackName = nil
-        return false
-    end
-    if rigData.activeTrackName == desiredName and desired.IsPlaying then
-        return true
-    end
-    for name, track in pairs(rigData.tracks) do
-        if name ~= desiredName and track.IsPlaying then
-            safeCall(function()
-                track:Stop(0.22)
-            end)
-        end
-    end
-    safeCall(function()
-        desired:Play(0.22, 1, desiredName == "MechaRun" and 1.12 or 1)
-    end)
-    rigData.activeTrackName = desiredName
-    return true
-end
-
-local function stopRigAnimations(rigData)
-    if rigData and rigData.tracks then
-        for _, track in pairs(rigData.tracks) do
-            safeCall(function()
-                track:Stop(0.15)
-            end)
-        end
-    end
-end
-
---==============================================================
--- 8. POSE PROCEDURAL DO MECHA
---==============================================================
-local function findMotorForPart(rigData, targetNames, motorNames)
-    if not rigData or not rigData.motors then
-        return nil
-    end
-    for _, data in ipairs(rigData.motors) do
-        local motor = data.motor
-        if motor and motor.Parent then
-            local part1Name = motor.Part1 and motor.Part1.Name or ""
-            local part0Name = motor.Part0 and motor.Part0.Name or ""
-            local lowerMotor = string.lower(motor.Name)
-            for _, target in ipairs(targetNames or {}) do
-                if string.lower(part1Name) == string.lower(target) or string.lower(part0Name) == string.lower(target) then
-                    return data
-                end
-            end
-            for _, target in ipairs(motorNames or {}) do
-                if string.find(lowerMotor, string.lower(target)) then
-                    return data
-                end
-            end
-        end
-    end
-    return nil
-end
-
-local function applyProceduralPose(rigData, now, moveAmount, isRunning)
-    if not rigData or rigData.kind ~= STATE_MECHA then
-        return
-    end
-    local hasAuthored = rigData.activeTrackName and rigData.tracks[rigData.activeTrackName]
-        and rigData.tracks[rigData.activeTrackName].IsPlaying
-    if hasAuthored then
-        return
-    end
-
-    local frequency = isRunning and 8.5 or 5.7
-    local amplitude = math.clamp(moveAmount, 0, 1)
-    local gait = math.sin(now * frequency) * amplitude
-    local opposite = math.sin(now * frequency + math.pi) * amplitude
-
-    for _, motorData in ipairs(rigData.motors) do
-        local motor = motorData.motor
-        if motor and motor.Parent then
-            local partName = string.lower((motor.Part1 and motor.Part1.Name) or "")
-            local motorName = string.lower(motor.Name)
-            local transform = motorData.base
-
-            if string.find(partName, "leftupperleg") or string.find(partName, "leftleg")
-                or string.find(motorName, "lefthip") then
-                transform = transform * CFrame.Angles(gait * 0.48, 0, 0)
-            elseif string.find(partName, "rightupperleg") or string.find(partName, "rightleg")
-                or string.find(motorName, "righthip") then
-                transform = transform * CFrame.Angles(opposite * 0.48, 0, 0)
-            elseif string.find(partName, "leftupperarm") or string.find(partName, "leftarm")
-                or string.find(motorName, "leftshoulder") then
-                transform = transform * CFrame.Angles(opposite * 0.25, 0, math.rad(5) + gait * 0.12)
-            elseif string.find(partName, "rightupperarm") or string.find(partName, "rightarm")
-                or string.find(motorName, "rightshoulder") then
-                transform = transform * CFrame.Angles(gait * 0.25, 0, -math.rad(5) + opposite * 0.12)
-            elseif string.find(partName, "uppertorso") or string.find(partName, "torso")
-                or string.find(motorName, "waist") then
-                transform = transform * CFrame.Angles(math.rad(2) * amplitude, 0, math.rad(2.5) * gait)
-            end
-
-            if CONFIG.EnableProceduralHeadTracking
-                and (string.find(partName, "head") or string.find(motorName, "neck")) then
-                local look = camera and camera.CFrame.LookVector or Vector3.new(0, 0, -1)
-                local localLook = rigData.model:GetPivot():VectorToObjectSpace(look)
-                local yaw = math.clamp(math.atan2(localLook.X, -localLook.Z), -0.62, 0.62)
-                local pitch = math.clamp(math.asin(math.clamp(localLook.Y, -1, 1)), -0.28, 0.28)
-                transform = transform * CFrame.Angles(pitch, yaw, 0)
-            end
-            motor.Transform = transform
-        end
-    end
-end
-
---==============================================================
--- 9. PIVOT E POSIÇÃO SOBRE O TERRENO
---==============================================================
-local function groundPivotForData(rigData, horizontalPosition, yaw, excludes)
-    local groundY = raycastGround(horizontalPosition, excludes)
-    local y = groundY - (rigData and rigData.bottomOffset or -2.8) + 0.03
-    return CFrame.new(horizontalPosition.X, y, horizontalPosition.Z) * CFrame.Angles(0, yaw, 0)
-end
-
-local function getCurrentPivot()
-    if activeRig and activeRig.model and activeRig.model.Parent then
-        return activeRig.model:GetPivot()
-    end
-    if humanRoot and humanRoot.Parent then
-        return humanRoot.CFrame
-    end
-    return CFrame.new(0, 5, 0)
-end
-
-local function getExcludeList()
-    local list = {}
-    if character then
-        table.insert(list, character)
-    end
-    if activeRig and activeRig.model then
-        table.insert(list, activeRig.model)
-    end
-    return list
-end
-
-local function findWallBetween(startPosition, delta, excludes)
-    if delta.Magnitude < 0.05 then
-        return nil
-    end
-    local origin = startPosition + Vector3.new(0, CONFIG.WallRayHeight, 0)
-    return Workspace:Raycast(origin, delta, makeRayParams(excludes))
-end
-
---==============================================================
--- 10. SEQUÊNCIA COMPLETA DE TRANSFORMAÇÃO
---==============================================================
-local function resetSourceEffects(rigData)
-    if not rigData or not rigData.effects then
-        return
-    end
-    for _, emitter in ipairs(rigData.effects.emitters or {}) do
-        if emitter and emitter.Parent then
-            emitter.Enabled = false
-        end
-    end
-    for _, trail in ipairs(rigData.effects.trails or {}) do
-        if trail and trail.Parent then
-            trail.Enabled = false
-        end
-    end
-    if rigData.effects.selection then
-        rigData.effects.selection.Visible = false
-    end
-end
-
-local function destroyRig(rigData)
-    if not rigData then
-        return
-    end
-    stopRigAnimations(rigData)
-    resetSourceEffects(rigData)
-    if rigData.model and rigData.model.Parent then
-        rigData.model:Destroy()
-    end
-end
-
-local function setCameraSubjectForRig(rigData)
-    camera = Workspace.CurrentCamera or camera
-    if not camera or not rigData then
-        return
-    end
-    if rigData.kind == STATE_MECHA and rigData.humanoid then
-        camera.CameraSubject = rigData.humanoid
-    elseif rigData.root then
-        camera.CameraSubject = rigData.root
-    end
-end
-
-local function startTransitionEffects(rigData)
-    local root = rigData and rigData.root
-    if not root and humanRoot then
-        root = humanRoot
-    end
-    playSound("Sound_Transform_Start", root, false)
-    emitTransformEffects(rigData, 22)
-    if rigData and rigData.effects and rigData.effects.selection then
-        rigData.effects.selection.Visible = true
-    end
-end
-
-local function finishTransitionEffects(rigData)
-    local root = rigData and rigData.root or humanRoot
-    playSound("Sound_Transform_End", root, false)
-    emitTransformEffects(rigData, 30)
-    if rigData and rigData.effects and rigData.effects.selection then
-        rigData.effects.selection.Visible = false
-    end
-    if rigData and rigData.effects and rigData.effects.light then
-        rigData.effects.light.Brightness = 2.2
-    end
-end
-
-local function transitionTo(targetState)
-    if isBusy or targetState == currentState then
-        return
-    end
-    if targetState ~= STATE_HUMAN and targetState ~= STATE_MECHA and targetState ~= STATE_VEHICLE then
-        return
-    end
-
-    if targetState == STATE_MECHA and not resolveTemplate(CONFIG.MechaTemplateName) then
-        setStatus("MECHA AUSENTE", "CRIE ReplicatedStorage.MechaRig", CONFIG.WarningColor)
-        return
-    end
-    if targetState == STATE_VEHICLE and not resolveTemplate(CONFIG.VehicleTemplateName) then
-        setStatus("VEÍCULO AUSENTE", "CRIE ReplicatedStorage.VehicleRig", CONFIG.WarningColor)
-        return
-    end
-    if currentState == STATE_HUMAN and targetState ~= STATE_HUMAN then
-        if not suspendHuman() then
-            return
-        end
-    end
-
-    isBusy = true
-    currentState = STATE_TRANSFORMING
-    updateButtons()
-    progressBack.Visible = true
-    progressFill.Size = UDim2.fromScale(0, 1)
-    setStatus("SISTEMA DE TRANSFORMAÇÃO ATIVADO...", "SINCRONIZANDO PLACAS // 0%", CONFIG.AccentColor)
-
-    local sourceRig = activeRig
-    local isReturningHuman = targetState == STATE_HUMAN
-    local oldPivot = getCurrentPivot()
-    local facingYaw = getYaw(oldPivot)
-    local horizontalPosition = Vector3.new(oldPivot.Position.X, oldPivot.Position.Y, oldPivot.Position.Z)
-    local targetRig = nil
-    local targetPivot = oldPivot
-
-    if not isReturningHuman then
-        local template = resolveTemplate(targetState == STATE_MECHA and CONFIG.MechaTemplateName or CONFIG.VehicleTemplateName)
-        local dummyPivot = template:GetPivot()
-        local bottomOffset = calculateBottomOffset(template)
-        local groundY = raycastGround(horizontalPosition, getExcludeList())
-        local pivotY = groundY - bottomOffset + 0.03
-        targetPivot = CFrame.new(horizontalPosition.X, pivotY, horizontalPosition.Z) * CFrame.Angles(0, facingYaw, 0)
-        if targetState == STATE_MECHA then
-            local err
-            targetRig, err = prepareMechaModel(targetPivot, true)
-            if not targetRig then
-                warn("[Transformer Engine] " .. tostring(err))
-                setStatus("FALHA AO CRIAR ROBÔ", tostring(err), CONFIG.WarningColor)
-                isBusy = false
-                currentState = sourceRig and sourceRig.kind or STATE_HUMAN
-                progressBack.Visible = false
-                updateButtons()
-                if humanCache and humanCache.suspended and not sourceRig then
-                    restoreHuman(oldPivot)
-                end
-                return
-            end
-        else
-            local err
-            targetRig, err = prepareVehicleModel(targetPivot, true)
-            if not targetRig then
-                warn("[Transformer Engine] " .. tostring(err))
-                setStatus("FALHA AO CRIAR VEÍCULO", tostring(err), CONFIG.WarningColor)
-                isBusy = false
-                currentState = sourceRig and sourceRig.kind or STATE_HUMAN
-                progressBack.Visible = false
-                updateButtons()
-                if humanCache and humanCache.suspended and not sourceRig then
-                    restoreHuman(oldPivot)
-                end
-                return
-            end
-        end
-        targetRig.pivot = targetPivot
-        setExplodedPose(targetRig)
-        setCameraSubjectForRig(targetRig)
-        tweenCameraFOV(targetState == STATE_MECHA and CONFIG.MechaFOV or CONFIG.VehicleFOV, 0.7)
-        if targetState == STATE_MECHA then
-            loadAuthoredAnimations(targetRig)
+    if form == FORMS.HUMANOIDE then
+        setAvatarVisible(1)
+        status.Text = "SISTEMA ONLINE  •  HUMANOIDE"
+        status.TextColor3 = COLORS.BlueLight
+    elseif form == FORMS.MECHA then
+        setAvatarVisible(0)
+        status.Text = "MODO MECHA  •  NÚCLEO ENERGON ATIVO"
+        status.TextColor3 = COLORS.BlueLight
+        for _, emitter in ipairs(mechaSmokeEmitters) do
+            if emitter and emitter.Parent then safeCall(function() emitter:Emit(8) end) end
         end
     else
-        -- Prepara o avatar humano escondido para ser remontado na posição atual da máquina.
-        if humanCache then
-            local groundY = raycastGround(horizontalPosition, getExcludeList())
-            local humanY = groundY - humanCache.rootBottomOffset + 0.03
-            targetPivot = CFrame.new(horizontalPosition.X, humanY, horizontalPosition.Z) * CFrame.Angles(0, facingYaw, 0)
-            placeHumanFolded(targetPivot)
-        end
-        camera = Workspace.CurrentCamera or camera
-        if camera and humanCache then
-            camera.CameraSubject = humanCache.humanoid
-        end
-        tweenCameraFOV(CONFIG.HumanFOV, 0.7)
+        setAvatarVisible(0)
+        status.Text = "MODO VEÍCULO  •  PROPULSÃO ONLINE"
+        status.TextColor3 = COLORS.RedLight
     end
 
-    if sourceRig and sourceRig.kind == STATE_MECHA then
-        playTransformationTrack(sourceRig)
-    end
-    if targetRig and targetRig.kind == STATE_MECHA then
-        playTransformationTrack(targetRig)
-    end
-    startTransitionEffects(targetRig or sourceRig)
-    local duration = isReturningHuman and CONFIG.TransformHumanDuration or CONFIG.TransformDuration
-    local startTime = os.clock()
-    local midSoundPlayed = false
-
-    while true do
-        local elapsed = os.clock() - startTime
-        local raw = clamp01(elapsed / duration)
-        local collapseAlpha = easeOutCubic((raw - 0.10) / 0.82)
-        local buildAlpha = easeOutBack((raw - 0.20) / 0.80)
-        buildAlpha = math.clamp(buildAlpha, 0, 1.08)
-
-        if sourceRig then
-            animateSourceCollapse(sourceRig, collapseAlpha)
-        elseif not isReturningHuman then
-            animateHumanDisassembly(collapseAlpha, targetPivot)
-        end
-
-        if targetRig then
-            animateTargetBuild(targetRig, buildAlpha)
-        elseif isReturningHuman then
-            animateHumanAssembly(buildAlpha, targetPivot)
-        end
-
-        progressFill.Size = UDim2.fromScale(raw, 1)
-        statusLabel.Text = "SISTEMA DE TRANSFORMAÇÃO ATIVADO..."
-        statusDetail.Text = "MONTAGEM MECÂNICA // " .. tostring(math.floor(raw * 100)) .. "%"
-        blur.Size = math.sin(raw * math.pi) * 7
-
-        if raw >= 0.52 and not midSoundPlayed then
-            midSoundPlayed = true
-            playSound("Sound_Transform_Mid", targetRig and targetRig.root or (sourceRig and sourceRig.root) or humanRoot, false)
-            emitTransformEffects(targetRig or sourceRig, 18)
-        end
-        if raw >= 1 then
-            break
-        end
-        RunService.RenderStepped:Wait()
-    end
-
+    barBack.Visible = false
+    barFill.Size = UDim2.new(0, 0, 1, 0)
     blur.Size = 0
-    if sourceRig then
-        destroyRig(sourceRig)
-    end
-    activeRig = nil
+    setEffectsEnabled(false, form == FORMS.VEICULO)
+    updateButtonStates()
+end
 
-    if isReturningHuman then
-        local restored = restoreHuman(targetPivot)
-        if not restored then
-            setStatus("ERRO AO RESTAURAR HUMANO", "O AVATAR PODE TER SIDO RECRIADO", CONFIG.WarningColor)
-        end
-        currentState = STATE_HUMAN
-        stopLoopSound()
-        moveSpeedCurrent = 0
-        vehicleSpeedCurrent = 0
-        verticalVelocity = 0
-        finishTransitionEffects(nil)
-        setStatus("SISTEMA ONLINE // HUMANO", "CONTROLES ORIGINAIS RESTAURADOS", CONFIG.AccentColor)
-    else
-        activeRig = targetRig
-        currentState = targetState
-        if activeRig then
-            activeRig.pivot = targetPivot
-            setRigVisibility(activeRig, 0)
-            if activeRig.kind == STATE_MECHA then
-                for _, motorData in ipairs(activeRig.motors) do
-                    if motorData.motor and motorData.motor.Parent then
-                        motorData.motor.Transform = motorData.base
-                    end
-                end
-                if activeRig.effects and activeRig.effects.trails then
-                    for _, trail in ipairs(activeRig.effects.trails) do
-                        trail.Enabled = false
-                    end
-                end
-                changeMechaTrack(activeRig, "MechaIdle")
-                stopLoopSound()
-                setStatus("FORMA MECHA // ONLINE", "ATUADORES E REATOR ESTÁVEIS", CONFIG.AccentColor)
-            else
-                stopLoopSound()
-                playSound("Sound_Vehicle_Engine", activeRig.root, true)
-                setStatus("FORMA VEÍCULO // ONLINE", "TRAÇÃO E DIREÇÃO ATIVAS", CONFIG.AccentColor)
-            end
-            setCameraSubjectForRig(activeRig)
-        end
-        finishTransitionEffects(activeRig)
-    end
-
-    progressFill.Size = UDim2.fromScale(1, 1)
-    task.delay(0.45, function()
-        if not destroying and not isBusy then
-            progressBack.Visible = false
-            progressFill.Size = UDim2.fromScale(0, 1)
-        end
+---------------------------
+-- 9. INICIALIZAÇÃO DO AVATAR E RESPAWN
+---------------------------
+local function bindCharacter(char)
+    local ok = pcall(function()
+        captureCharacter(char)
     end)
-    isBusy = false
-    updateButtons()
-end
+    if not ok then return end
 
---==============================================================
--- 11. MOVIMENTO E CONTROLE MOBILE
---==============================================================
-local function moveMecha(dt, moveVector)
-    if not activeRig or not activeRig.model or not activeRig.model.Parent then
-        return
-    end
-    local pivot = activeRig.model:GetPivot()
-    local position = pivot.Position
-    local moveDirection = getCameraRelativeDirection(moveVector)
-    local amount = math.clamp(Vector3.new(moveVector.X, 0, moveVector.Z).Magnitude, 0, 1)
-    local shiftHeld = CONFIG.EnableKeyboardShortcuts and UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
-    local targetSpeed = shiftHeld and CONFIG.MechaRunSpeed or CONFIG.MechaWalkSpeed
-    if amount < 0.08 then
-        targetSpeed = 0
-    end
-    moveSpeedCurrent = lerpNumber(moveSpeedCurrent, targetSpeed * amount, math.clamp(dt * 5.5, 0, 1))
-
-    local nextPosition = position
-    if moveDirection.Magnitude > 0.01 and moveSpeedCurrent > 0.05 then
-        local delta = moveDirection * moveSpeedCurrent * dt
-        local wall = findWallBetween(position, delta, getExcludeList())
-        if not wall then
-            nextPosition += delta
-        end
-    end
-
-    local groundY = raycastGround(Vector3.new(nextPosition.X, position.Y, nextPosition.Z), getExcludeList())
-    local groundedPivotY = groundY - activeRig.bottomOffset + 0.03
-    if jumpRequested then
-        if math.abs(position.Y - groundedPivotY) < 1.0 or position.Y < groundedPivotY + 0.25 then
-            verticalVelocity = CONFIG.MechaJumpVelocity
-            emitTransformEffects(activeRig, 12)
-        end
-        jumpRequested = false
-    end
-    verticalVelocity -= CONFIG.Gravity * dt
-    local nextY = position.Y + verticalVelocity * dt
-    if nextY <= groundedPivotY then
-        nextY = groundedPivotY
-        verticalVelocity = 0
-    end
-
-    local desiredCF
-    if moveDirection.Magnitude > 0.05 then
-        desiredCF = CFrame.lookAt(Vector3.new(nextPosition.X, nextY, nextPosition.Z), Vector3.new(nextPosition.X, nextY, nextPosition.Z) + moveDirection)
-    else
-        desiredCF = CFrame.new(nextPosition.X, nextY, nextPosition.Z) * CFrame.Angles(0, getYaw(pivot), 0)
-    end
-    activeRig.model:PivotTo(desiredCF)
-    activeRig.pivot = desiredCF
-
-    local walking = amount > 0.08
-    local running = walking and (shiftHeld or amount > 0.88)
-    local trackName = "MechaIdle"
-    if verticalVelocity > 4 and activeRig.tracks.MechaJump then
-        trackName = "MechaJump"
-    elseif running then
-        trackName = "MechaRun"
-    elseif walking then
-        trackName = "MechaWalk"
-    end
-    if not changeMechaTrack(activeRig, trackName) then
-        applyProceduralPose(activeRig, sessionClock, amount, running)
-    end
-
-    footstepClock += dt
-    if walking and footstepClock > (running and 0.36 or 0.56) then
-        footstepClock = 0
-        playSound("Sound_Footstep_Mecha", activeRig.root, false)
-        if activeRig.effects and activeRig.effects.emitters then
-            for _, emitter in ipairs(activeRig.effects.emitters) do
-                if emitter and string.find(string.lower(emitter.Name), "smoke") then
-                    safeCall(function() emitter:Emit(5) end)
-                end
-            end
-        end
-    end
-    if activeRig.effects and activeRig.effects.light then
-        activeRig.effects.light.Brightness = 1.45 + math.sin(sessionClock * 3.1) * 0.45
-    end
-    if activeRig.effects and activeRig.effects.trails then
-        for _, trail in ipairs(activeRig.effects.trails) do
-            trail.Enabled = running
-        end
-    end
-end
-
-local function moveVehicle(dt, moveVector)
-    if not activeRig or not activeRig.model or not activeRig.model.Parent then
-        return
-    end
-    local pivot = activeRig.model:GetPivot()
-    local position = pivot.Position
-    local forwardInput = math.clamp(-moveVector.Z, -1, 1)
-    local steerInput = math.clamp(moveVector.X, -1, 1)
-    local yaw = getYaw(pivot)
-
-    local turnScale = math.abs(forwardInput) > 0.05 and math.sign(forwardInput) or 0.35
-    local turnRate = math.abs(forwardInput) > 0.05 and CONFIG.VehicleTurnSpeed or CONFIG.VehicleIdleTurnSpeed
-    yaw -= steerInput * turnRate * turnScale * dt
-
-    local targetSpeed
-    if forwardInput >= 0 then
-        targetSpeed = CONFIG.VehicleMaxSpeed * forwardInput
-    else
-        targetSpeed = CONFIG.VehicleReverseSpeed * forwardInput
-    end
-    local accel = math.abs(targetSpeed) < math.abs(vehicleSpeedCurrent) and CONFIG.VehicleBrake or CONFIG.VehicleAcceleration
-    vehicleSpeedCurrent = lerpNumber(vehicleSpeedCurrent, targetSpeed, math.clamp(dt * accel / 10, 0, 1))
-
-    local headingCF = CFrame.new(position) * CFrame.Angles(0, yaw, 0)
-    local delta = headingCF.LookVector * vehicleSpeedCurrent * dt
-    local nextPosition = position
-    if math.abs(vehicleSpeedCurrent) > 0.03 then
-        local wall = findWallBetween(position, delta, getExcludeList())
-        if not wall then
-            nextPosition += delta
+    if humanoid and hrp then
+        if form == FORMS.HUMANOIDE then
+            setAvatarVisible(1)
         else
-            vehicleSpeedCurrent = 0
+            setAvatarVisible(0)
+            applyFormMovement(form)
         end
-    end
-
-    local groundY = raycastGround(Vector3.new(nextPosition.X, position.Y, nextPosition.Z), getExcludeList())
-    local nextY = groundY - activeRig.bottomOffset + 0.03
-    local newPivot = CFrame.new(nextPosition.X, nextY, nextPosition.Z) * CFrame.Angles(0, yaw, 0)
-    activeRig.model:PivotTo(newPivot)
-    activeRig.pivot = newPivot
-
-    -- Giro visual das rodas; os nomes aceitos incluem Wheel/Tire.
-    local rotation = sessionClock * (vehicleSpeedCurrent / 2.2)
-    for _, wheelData in ipairs(activeRig.wheels or {}) do
-        local part = wheelData.part
-        if part and part.Parent then
-            part.CFrame = newPivot * wheelData.localCF * CFrame.Angles(rotation, 0, 0)
-        end
-    end
-    if activeRig.effects and activeRig.effects.light then
-        activeRig.effects.light.Brightness = 0.8 + math.clamp(math.abs(vehicleSpeedCurrent) / CONFIG.VehicleMaxSpeed, 0, 1) * 0.8
     end
 end
 
---==============================================================
--- 12. ENTRADAS: BOTÕES, TECLADO E SALTO
---==============================================================
-transformButton.Activated:Connect(function()
-    if currentState == STATE_HUMAN then
-        transitionTo(STATE_MECHA)
-    elseif currentState == STATE_MECHA then
-        transitionTo(STATE_VEHICLE)
-    elseif currentState == STATE_VEHICLE then
-        transitionTo(STATE_MECHA)
-    end
-end)
-
-humanButton.Activated:Connect(function()
-    transitionTo(STATE_HUMAN)
-end)
-
-jumpButton.Activated:Connect(function()
-    if isBusy then
-        return
-    end
-    if currentState == STATE_MECHA then
-        jumpRequested = true
-    elseif currentState == STATE_VEHICLE then
-        -- Impulso visual curto para o veículo; não substitui uma física de suspensão.
-        local attach = activeRig and activeRig.effects and activeRig.effects.emitters
-        if attach then
-            emitTransformEffects(activeRig, 16)
-        end
-        vehicleSpeedCurrent = math.min(vehicleSpeedCurrent + 8, CONFIG.VehicleMaxSpeed)
-    end
-end)
-
-if CONFIG.EnableKeyboardShortcuts then
-    UserInputService.InputBegan:Connect(function(input, processed)
-        if processed or isBusy then
-            return
-        end
-        if input.KeyCode == Enum.KeyCode.T then
-            if currentState == STATE_HUMAN then
-                transitionTo(STATE_MECHA)
-            elseif currentState == STATE_MECHA then
-                transitionTo(STATE_VEHICLE)
-            elseif currentState == STATE_VEHICLE then
-                transitionTo(STATE_MECHA)
-            end
-        elseif input.KeyCode == Enum.KeyCode.H then
-            transitionTo(STATE_HUMAN)
-        elseif input.KeyCode == Enum.KeyCode.Space and (currentState == STATE_MECHA or currentState == STATE_VEHICLE) then
-            jumpRequested = true
-        end
+if player.Character then
+    task.spawn(bindCharacter, player.Character)
+end
+player.CharacterAdded:Connect(function(char)
+    task.spawn(function()
+        bindCharacter(char)
     end)
-end
+end)
 
---==============================================================
--- 13. CÂMERA E LOOP PRINCIPAL
---==============================================================
-RunService:BindToRenderStep("TransformerEngineCameraFX", Enum.RenderPriority.Camera.Value + 1, function(dt)
-    if destroying or not CONFIG.EnableCameraShake or isBusy or not activeRig then
-        return
+---------------------------
+-- 10. ENTRADA: TECLADO OPCIONAL E TOQUE MOBILE
+---------------------------
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed or destroyed or not CFG.SHOW_KEYBOARD_SHORTCUTS then return end
+    if input.KeyCode == Enum.KeyCode.T then
+        requestForm(FORMS.MECHA)
+    elseif input.KeyCode == Enum.KeyCode.V then
+        requestForm(FORMS.VEICULO)
+    elseif input.KeyCode == Enum.KeyCode.H then
+        requestForm(FORMS.HUMANOIDE)
     end
+end)
+
+---------------------------
+-- 11. LOOP VISUAL ÚNICO (OTIMIZADO)
+---------------------------
+local renderConnection
+renderConnection = RunService.RenderStepped:Connect(function(deltaTime)
+    if destroyed then return end
     camera = Workspace.CurrentCamera or camera
-    if not camera then
+
+    if not character or not character.Parent or not humanoid or not hrp or not hrp.Parent then
+        status.Text = "AGUARDANDO PERSONAGEM..."
         return
     end
-    local speed = currentState == STATE_VEHICLE and math.abs(vehicleSpeedCurrent) or moveSpeedCurrent
-    local intensity = math.clamp(speed / (currentState == STATE_VEHICLE and CONFIG.VehicleMaxSpeed or CONFIG.MechaRunSpeed), 0, 1)
-    if intensity > 0.04 then
-        local x = math.sin(sessionClock * CONFIG.CameraShakeFrequency) * CONFIG.CameraShake * intensity * 0.18
-        local y = math.abs(math.cos(sessionClock * CONFIG.CameraShakeFrequency * 1.5)) * CONFIG.CameraShake * intensity * 0.22
-        camera.CFrame = camera.CFrame * CFrame.new(x, y, 0)
+
+    local now = os.clock()
+    local moveMagnitude = humanoid.MoveDirection.Magnitude
+    local moving = moveMagnitude > 0.05 and not transition
+    for _, trail in ipairs(mechaTrails) do
+        if trail and trail.Parent then
+            trail.Enabled = (not transition) and form == FORMS.MECHA and moving and moveMagnitude > 0.45
+        end
+    end
+    local speedScale = 1
+    if form == FORMS.VEICULO then
+        speedScale = 1.65
+    elseif form == FORMS.MECHA then
+        speedScale = 1.05
+    end
+    if moving then
+        walkPhase += deltaTime * (form == FORMS.VEICULO and 11 or 7.3) * math.clamp(moveMagnitude, 0, 1)
+        wheelPhase += deltaTime * (form == FORMS.VEICULO and 7.5 or 0)
+    end
+    effectTick += deltaTime
+
+    local rootCF = hrp.CFrame
+    local look = camera and camera.CFrame.LookVector or rootCF.LookVector
+    local cameraLocalLook = rootCF:VectorToObjectSpace(look)
+
+    local mVis, mAssembly = 0, 1
+    local vVis, vAssembly = 0, 1
+    local avatarVisible = form == FORMS.HUMANOIDE and 1 or 0
+    local blurAmount = 0
+    local progress = 0
+    local bob = moving and math.abs(math.sin(walkPhase * 2)) * (form == FORMS.MECHA and 0.08 or 0.025) or 0
+
+    if transition then
+        progress = clamp01((now - transition.startTime) / transition.duration)
+        transition.progress = progress
+        local eased = smoothstep(progress)
+        if transition.from == FORMS.MECHA then
+            mVis = 1 - eased
+            mAssembly = 1 - eased
+        elseif transition.to == FORMS.MECHA then
+            mVis = eased
+            mAssembly = eased
+        end
+        if transition.from == FORMS.VEICULO then
+            vVis = 1 - eased
+            vAssembly = 1 - eased
+        elseif transition.to == FORMS.VEICULO then
+            vVis = eased
+            vAssembly = eased
+        end
+
+        if transition.from == FORMS.HUMANOIDE then
+            avatarVisible = 1 - eased
+        elseif transition.to == FORMS.HUMANOIDE then
+            avatarVisible = eased
+        else
+            avatarVisible = 0
+        end
+
+        blurAmount = math.sin(progress * math.pi) * 7
+        barFill.Size = UDim2.new(progress, 0, 1, 0)
+        status.Text = "TRANSFORMANDO  •  " .. tostring(math.floor(progress * 100 + 0.5)) .. "%"
+        if progress >= 1 then
+            completeTransition()
+            mVis = form == FORMS.MECHA and 1 or 0
+            mAssembly = 1
+            vVis = form == FORMS.VEICULO and 1 or 0
+            vAssembly = 1
+            avatarVisible = form == FORMS.HUMANOIDE and 1 or 0
+            blurAmount = 0
+        end
+    else
+        if form == FORMS.MECHA then mVis = 1 end
+        if form == FORMS.VEICULO then vVis = 1 end
+        if form == FORMS.HUMANOIDE then avatarVisible = 1 end
+    end
+
+    setAvatarVisible(avatarVisible)
+
+    local mechaRootCF = rootCF * CFrame.new(0, 0.62, 0)
+    local vehicleRootCF = rootCF * CFrame.new(0, -1.45, 0)
+    local mechaBob = form == FORMS.MECHA and bob or (transition and (transition.to == FORMS.MECHA or transition.from == FORMS.MECHA) and math.sin(progress * math.pi * 6) * 0.035 or 0)
+
+    updateModel(mechaParts, mechaRootCF, mVis, mAssembly, FORMS.MECHA, walkPhase, moving and form == FORMS.MECHA, cameraLocalLook, now, mechaBob)
+    updateModel(vehicleParts, vehicleRootCF, vVis, vAssembly, FORMS.VEICULO, wheelPhase, moving and form == FORMS.VEICULO, cameraLocalLook, now, 0)
+
+    if mechaCoreLight and mechaCoreLight.Parent then
+        local active = form == FORMS.MECHA or (transition and (transition.from == FORMS.MECHA or transition.to == FORMS.MECHA))
+        local pulse = 2.0 + (math.sin(now * 3.2) + 1) * 0.5
+        mechaCoreLight.Brightness = active and pulse or 0
+        mechaCoreLight.Range = active and (11 + math.sin(now * 2.0) * 1.3) or 0
+    end
+    for _, eye in ipairs(mechaEyeParts) do
+        if eye and eye.Parent then
+            local active = form == FORMS.MECHA or (transition and transition.to == FORMS.MECHA)
+            eye.Color = active and COLORS.BlueLight or COLORS.Steel
+        end
+    end
+    for _, light in ipairs(vehicleLights) do
+        if light and light.Parent then
+            light.Brightness = (form == FORMS.VEICULO or (transition and transition.to == FORMS.VEICULO)) and (1.0 + math.sin(now * 4) * 0.18) or 0
+        end
+    end
+
+    local desiredFOV = CFG.HUMANOID_FOV
+    if form == FORMS.MECHA then desiredFOV = CFG.MECHA_FOV end
+    if form == FORMS.VEICULO then desiredFOV = CFG.VEHICLE_FOV end
+    if transition then
+        local fromFOV = transition.from == FORMS.MECHA and CFG.MECHA_FOV or (transition.from == FORMS.VEICULO and CFG.VEHICLE_FOV or CFG.HUMANOID_FOV)
+        local toFOV = transition.to == FORMS.MECHA and CFG.MECHA_FOV or (transition.to == FORMS.VEICULO and CFG.VEHICLE_FOV or CFG.HUMANOID_FOV)
+        desiredFOV = fromFOV + (toFOV - fromFOV) * smoothstep(progress)
+    end
+    if camera then
+        camera.FieldOfView = camera.FieldOfView + (desiredFOV - camera.FieldOfView) * math.clamp(deltaTime * 3.5, 0, 1)
+    end
+    if blur then
+        blur.Size = blur.Size + (blurAmount - blur.Size) * math.clamp(deltaTime * 9, 0, 1)
+    end
+
+    if not transition then
+        updateButtonStates()
     end
 end)
 
-RunService.RenderStepped:Connect(function(dt)
-    if destroying then
-        return
-    end
-    sessionClock += dt
-    if isBusy then
-        return
-    end
-    if currentState ~= STATE_MECHA and currentState ~= STATE_VEHICLE then
-        return
-    end
-    local moveVector = getMoveVector()
-    if currentState == STATE_MECHA then
-        moveMecha(dt, moveVector)
-    elseif currentState == STATE_VEHICLE then
-        moveVehicle(dt, moveVector)
-    end
-end)
-
---==============================================================
--- 14. CICLO DE VIDA E DIAGNÓSTICO VISÍVEL
---==============================================================
-player.CharacterAdded:Connect(function(newCharacter)
-    -- Se o personagem reaparecer enquanto estiver na forma humana, atualiza as referências.
-    character = newCharacter
-    if currentState == STATE_HUMAN and not isBusy then
-        task.defer(function()
-            local newHumanoid = newCharacter:WaitForChild("Humanoid", 10)
-            local newRoot = newCharacter:WaitForChild("HumanoidRootPart", 10)
-            if newHumanoid and newRoot and currentState == STATE_HUMAN then
-                humanoid = newHumanoid
-                humanRoot = newRoot
-                humanCache = nil
-                camera = Workspace.CurrentCamera or camera
-                if camera then
-                    camera.CameraSubject = humanoid
-                end
-                setStatus("SISTEMA ONLINE // HUMANO", "NOVO AVATAR DETECTADO", CONFIG.AccentColor)
-            end
+---------------------------
+-- 12. ELEGÂNCIA: LIMPEZA QUANDO O SCRIPT É REMOVIDO
+---------------------------
+local function cleanup()
+    if destroyed then return end
+    destroyed = true
+    if renderConnection then renderConnection:Disconnect() end
+    if descendantConnection then descendantConnection:Disconnect() end
+    if humanoid and normalProperties then
+        pcall(function()
+            humanoid.WalkSpeed = normalProperties.WalkSpeed or CFG.HUMANOID_SPEED
+            humanoid.UseJumpPower = normalProperties.UseJumpPower
+            humanoid.JumpPower = normalProperties.JumpPower or 50
+            humanoid.JumpHeight = normalProperties.JumpHeight or 7.2
+            humanoid.AutoRotate = normalProperties.AutoRotate ~= false
+            humanoid.CameraOffset = normalProperties.CameraOffset or Vector3.zero
         end)
     end
-end)
-
-script.Destroying:Connect(function()
-    destroying = true
-    stopLoopSound()
-    RunService:UnbindFromRenderStep("TransformerEngineCameraFX")
-    if activeRig then
-        destroyRig(activeRig)
-        activeRig = nil
+    for part, original in pairs(avatarParts) do
+        if part and part.Parent then
+            pcall(function() part.LocalTransparencyModifier = original end)
+        end
     end
-    if humanCache and humanCache.suspended then
-        -- Melhor esforço para não deixar o avatar invisível caso o script seja removido.
-        restoreHuman(getCurrentPivot())
+    if mechaModel and mechaModel.Parent then mechaModel:Destroy() end
+    if vehicleModel and vehicleModel.Parent then vehicleModel:Destroy() end
+    if screenGui and screenGui.Parent then screenGui:Destroy() end
+    if blur and blur.Parent then blur:Destroy() end
+    if _G.__TransformerEngineRequest == requestForm then
+        _G.__TransformerEngineRequest = nil
     end
-    if blur and blur.Parent then
-        blur.Size = 0
-    end
-    if screenGui and screenGui.Parent then
-        screenGui:Destroy()
-    end
-end)
-
--- Sinal de inicialização visível para diagnóstico no celular.
-local mechaTemplateExists = resolveTemplate(CONFIG.MechaTemplateName) ~= nil
-local vehicleTemplateExists = resolveTemplate(CONFIG.VehicleTemplateName) ~= nil
-if mechaTemplateExists and vehicleTemplateExists then
-    setStatus("SISTEMA ONLINE // HUMANO", "ROBÔ E VEÍCULO DETECTADOS", CONFIG.AccentColor)
-elseif not mechaTemplateExists and not vehicleTemplateExists then
-    setStatus("AGUARDANDO MODELOS", "FALTAM MechaRig E VehicleRig", CONFIG.WarningColor)
-elseif not mechaTemplateExists then
-    setStatus("AGUARDANDO MODELO", "FALTA ReplicatedStorage.MechaRig", CONFIG.WarningColor)
-else
-    setStatus("AGUARDANDO MODELO", "FALTA ReplicatedStorage.VehicleRig", CONFIG.WarningColor)
 end
-updateButtons()
+
+script.AncestryChanged:Connect(function(_, parent)
+    if parent == nil then cleanup() end
+end)
+
+updateButtonStates()
+print("[Transformer Engine] Autônomo iniciado. Toque em ROBÔ, VEÍCULO ou HUMANO.")
